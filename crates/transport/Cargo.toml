@@ -1,0 +1,13 @@
+[package]
+name = "zerocast_transport"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[lib]
+name = "zerocast_transport"
+path = "src/lib.rs"
+
+[dependencies]
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "time"] }
+anyhow = "1.0"
