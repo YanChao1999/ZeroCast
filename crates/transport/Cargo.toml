@@ -11,3 +11,12 @@ path = "src/lib.rs"
 [dependencies]
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "time"] }
 anyhow = "1.0"
+	# Lightweight RTP crate used by default (works with older toolchains)
+	rtp = "0.2"
+	# webrtc-util provides marshal/unmarshal traits used by `rtp`
+	webrtc-util = "0.2"
+
+# Note: webrtc-rs integration is planned but requires a newer Rust/Cargo.
+# To enable in the future, add:
+# webrtc = { git = "https://github.com/webrtc-rs/webrtc", optional = true }
+# and a matching feature in [features].

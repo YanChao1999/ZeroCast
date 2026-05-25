@@ -11,6 +11,12 @@ async fn main() -> anyhow::Result<()> {
             let s = zerocast_transport::Sender::bind(&local, &target).await?;
             s.run().await?;
         }
+        Some("cap") => {
+            let local = args.next().expect("missing local arg (e.g. 0.0.0.0:0)");
+            let target = args.next().expect("missing target arg (e.g. 192.168.1.10:5000)");
+            println!("Running capture+encode sender: {} -> {}", local, target);
+            zerocast_transport::capture_encode_and_send(&local, &target).await?;
+        }
         Some("recv") => {
             let local = args.next().expect("missing local arg (e.g. 0.0.0.0:5000)");
             println!("Running receiver: {}", local);
