@@ -14,7 +14,7 @@ use std::process::{Command, Stdio};
 /// returns a synthetic large NALU and a PTS computed from `frame_index` and 30 FPS.
 pub fn encode_frame_to_h264_annexb(rgb24: &[u8], width: u32, height: u32, frame_index: u64) -> Result<(Vec<Vec<u8>>, u128)> {
     // Build ffmpeg command to read raw RGB24 from stdin and output raw H264 (Annex-B) to stdout
-    let size_arg = format!("{}x{}", width, height);
+    let _size_arg = format!("{}x{}", width, height);
     // If built with the optional `libav` feature, prefer a libav-based encoder
     // (ffmpeg-next) for precise PTS extraction. This path is intentionally
     // unimplemented here so the feature remains opt-in until fully integrated.

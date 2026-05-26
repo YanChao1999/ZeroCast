@@ -105,7 +105,7 @@ impl Receiver {
     /// Run receiver loop parsing minimal RTP header and printing basic stats.
     pub async fn run(self) -> anyhow::Result<()> {
         let mut buf = vec![0u8; 1500];
-        let mut last_seq: Option<u16> = None;
+        let _last_seq: Option<u16> = None;
         // reassembly state per-SSRC for FU-A
         let mut reassembly: HashMap<u32, (Vec<u8>, u16)> = HashMap::new();
         // per-ssrc mapping: base RTP timestamp -> wall-clock ns at first receipt
