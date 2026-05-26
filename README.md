@@ -7,6 +7,7 @@ Goals
 - Native performance, low latency, small binaries
 - LAN-only: no cloud, no accounts
 - Cross-platform: Windows, macOS, Linux, Android, iOS
+- Could deploy on some edge device
 
 Quick start
 
@@ -60,6 +61,3 @@ Roadmap (short)
 2. Audio + mDNS discovery + sync
 3. Android receiver, then sender
 4. iOS support (ReplayKit + VideoToolbox)
-
-If you'd like, I can add example implementations for one platform (Windows capture or Linux PipeWire receiver) next.
-# ZeroCast

@@ -15,8 +15,12 @@ anyhow = "1.0"
 	rtp = "0.2"
 	# webrtc-util provides marshal/unmarshal traits used by `rtp`
 	webrtc-util = "0.2"
+ffmpeg-next = { version = "4.4", optional = true }
 
 # Note: webrtc-rs integration is planned but requires a newer Rust/Cargo.
 # To enable in the future, add:
 # webrtc = { git = "https://github.com/webrtc-rs/webrtc", optional = true }
 # and a matching feature in [features].
+
+[features]
+libav = ["ffmpeg-next"]
