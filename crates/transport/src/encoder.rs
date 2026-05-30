@@ -1,0 +1,689 @@
+//! Cross-platform H.264 encoding via the `ffmpeg` CLI (Approach A).
+//!
+//! Uses a long-lived `ffmpeg` pipe on Unix when it works; on Windows defaults to
+//! one-shot `ffmpeg` per frame (pipe encoder is unreliable after idle). Requires
+//! `ffmpeg` on `PATH` (Windows, macOS, Linux).
+//! When `ffmpeg` is missing, a lightweight synthetic encoder is used for tests.
+
+use anyhow::{bail, Context, Result};
+use std::io::Write;
+use std::process::{Command, Stdio};
+#[cfg(not(windows))]
+use std::io::Read;
+#[cfg(not(windows))]
+use std::time::Duration;
+#[cfg(not(windows))]
+use std::process::{Child, ChildStderr, ChildStdin, ChildStdout};
+#[cfg(not(windows))]
+use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
+#[cfg(not(windows))]
+use std::thread::{self, JoinHandle};
+
+pub const DEFAULT_WIDTH: u32 = 640;
+pub const DEFAULT_HEIGHT: u32 = 360;
+pub const DEFAULT_FPS: u32 = 30;
+
+const ANNEX_B_START_CODE: &[u8] = &[0, 0, 0, 1];
+
+#[cfg(not(windows))]
+const PIPE_ATTEMPT_TIMEOUT: Duration = Duration::from_millis(800);
+/// Trait boundary for swapping CLI encoding with platform HW encoders later.
+pub trait VideoEncoder {
+    fn encode_frame(&mut self, rgb24: &[u8], frame_index: u64) -> Result<(Vec<Vec<u8>>, u128)>;
+}
+
+/// One-shot encode (opens a persistent encoder, encodes one frame, then drops).
+#[allow(dead_code)]
+pub fn encode_frame_to_h264_annexb(
+    rgb24: &[u8],
+    width: u32,
+    height: u32,
+    frame_index: u64,
+) -> Result<(Vec<Vec<u8>>, u128)> {
+    let mut enc = FfmpegCliEncoder::open(width, height, DEFAULT_FPS)?;
+    enc.encode_frame(rgb24, frame_index)
+}
+
+enum EncoderBackend {
+    #[cfg(not(windows))]
+    Pipe {
+        child: Child,
+        stdin: ChildStdin,
+        frame_rx: Receiver<Vec<Vec<u8>>>,
+        reader_handle: JoinHandle<()>,
+    },
+    /// One `ffmpeg` process per frame (~100–500ms at 640p; reliable on Windows).
+    Oneshot,
+    Synthetic,
+}
+
+/// Long-lived `ffmpeg` subprocess tuned for low-latency LAN streaming.
+pub struct FfmpegCliEncoder {
+    width: u32,
+    height: u32,
+    fps: u32,
+    backend: EncoderBackend,
+    /// Cached SPS/PPS (Annex-B) for one-shot mode — prepended to each VCL access unit.
+    param_nals: Vec<Vec<u8>>,
+}
+
+impl FfmpegCliEncoder {
+    /// Test/dev fallback when `ffmpeg` is not installed.
+    pub fn open_synthetic(width: u32, height: u32, fps: u32) -> Self {
+        Self {
+            width,
+            height,
+            fps,
+            backend: EncoderBackend::Synthetic,
+            param_nals: Vec::new(),
+        }
+    }
+
+    pub fn open(width: u32, height: u32, fps: u32) -> Result<Self> {
+        Self::open_with_warmup(width, height, fps, None)
+    }
+
+    /// Open encoder and warm the pipe with `warmup_rgb24` (or black if `None`).
+    pub fn open_with_warmup(
+        width: u32,
+        height: u32,
+        fps: u32,
+        warmup_rgb24: Option<&[u8]>,
+    ) -> Result<Self> {
+        #[cfg(feature = "libav")]
+        {
+            let _ = (width, height, fps, warmup_rgb24);
+            bail!("disable the `libav` feature to use the ffmpeg CLI encoder");
+        }
+
+        #[cfg(windows)]
+        {
+            let mut param_nals = Vec::new();
+            if let Some(warmup) = warmup_rgb24 {
+                match prime_param_nals(warmup, width, height, fps) {
+                    Ok(nals) if !nals.is_empty() => param_nals = nals,
+                    Ok(_) => eprintln!("encoder: warning: could not cache SPS/PPS from warmup"),
+                    Err(e) => eprintln!("encoder: warning: SPS/PPS prime failed: {e:#}"),
+                }
+            }
+            eprintln!("encoder: one-shot ffmpeg on Windows (live pipe encoder is unreliable)");
+            return Ok(Self {
+                width,
+                height,
+                fps,
+                backend: EncoderBackend::Oneshot,
+                param_nals,
+            });
+        }
+
+        #[cfg(not(windows))]
+        match try_spawn_ffmpeg(width, height, fps, warmup_rgb24) {
+            Ok(backend) => Ok(Self {
+                width,
+                height,
+                fps,
+                backend,
+                param_nals: Vec::new(),
+            }),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Self {
+                width,
+                height,
+                fps,
+                backend: EncoderBackend::Synthetic,
+                param_nals: Vec::new(),
+            }),
+            Err(e) => Err(e).context("failed to spawn ffmpeg"),
+        }
+    }
+
+    #[cfg(not(windows))]
+    fn switch_to_oneshot(&mut self) {
+        if let EncoderBackend::Pipe {
+            mut child,
+            reader_handle,
+            ..
+        } = std::mem::replace(&mut self.backend, EncoderBackend::Oneshot)
+        {
+            let _ = child.kill();
+            let _ = child.wait();
+            let _ = reader_handle.join();
+        }
+        eprintln!("encoder: switched to one-shot ffmpeg");
+    }
+
+    fn frame_bytes(&self) -> usize {
+        (self.width as usize) * (self.height as usize) * 3
+    }
+
+    fn pts_ns(&self, frame_index: u64) -> u128 {
+        (frame_index as u128)
+            .saturating_mul(1_000_000_000u128)
+            / (self.fps.max(1) as u128)
+    }
+}
+
+impl VideoEncoder for FfmpegCliEncoder {
+    fn encode_frame(&mut self, rgb24: &[u8], frame_index: u64) -> Result<(Vec<Vec<u8>>, u128)> {
+        let expected = self.frame_bytes();
+        if rgb24.len() != expected {
+            bail!(
+                "frame size mismatch: got {} bytes, expected {} ({}x{} RGB24)",
+                rgb24.len(),
+                expected,
+                self.width,
+                self.height
+            );
+        }
+
+        match &mut self.backend {
+            EncoderBackend::Synthetic => Ok((
+                synthetic_nalus(self.width, self.height, frame_index),
+                self.pts_ns(frame_index),
+            )),
+            EncoderBackend::Oneshot => {
+                if self.param_nals.is_empty() {
+                    if let Ok(nals) = prime_param_nals(rgb24, self.width, self.height, self.fps) {
+                        self.param_nals = nals;
+                    }
+                }
+                let nalus = encode_frame_oneshot(rgb24, self.width, self.height, self.fps)?;
+                let nalus = attach_param_nals(&self.param_nals, nalus)?;
+                Ok((nalus, self.pts_ns(frame_index)))
+            }
+            #[cfg(not(windows))]
+            EncoderBackend::Pipe { stdin, frame_rx, .. } => {
+                stdin
+                    .write_all(rgb24)
+                    .context("failed to write frame to ffmpeg stdin")?;
+                stdin.flush().context("failed to flush ffmpeg stdin")?;
+
+                match frame_rx.recv_timeout(PIPE_ATTEMPT_TIMEOUT) {
+                    Ok(nalus) if !nalus.is_empty() => Ok((nalus, self.pts_ns(frame_index))),
+                    Ok(_) | Err(RecvTimeoutError::Timeout) => {
+                        self.switch_to_oneshot();
+                        encode_frame_oneshot(rgb24, self.width, self.height, self.fps)
+                            .map(|nalus| (nalus, self.pts_ns(frame_index)))
+                    }
+                    Err(RecvTimeoutError::Disconnected) => {
+                        bail!("ffmpeg stdout reader exited unexpectedly");
+                    }
+                }
+            }
+        }
+    }
+}
+
+impl Drop for FfmpegCliEncoder {
+    fn drop(&mut self) {
+        #[cfg(not(windows))]
+        if let EncoderBackend::Pipe {
+            mut child,
+            reader_handle,
+            ..
+        } = std::mem::replace(&mut self.backend, EncoderBackend::Synthetic)
+        {
+            let _ = child.kill();
+            let _ = child.wait();
+            let _ = reader_handle.join();
+        }
+    }
+}
+
+/// Extract SPS/PPS from a one-frame encode (default x264 emits param sets only).
+fn prime_param_nals(rgb24: &[u8], width: u32, height: u32, fps: u32) -> Result<Vec<Vec<u8>>> {
+    let nalus = run_oneshot_ffmpeg(rgb24, width, height, fps, OneshotMode::ParamSets)?;
+    let params: Vec<Vec<u8>> = nalus
+        .into_iter()
+        .filter(|n| matches!(nalu_type_of(n), Some(7 | 8)))
+        .collect();
+    if params.is_empty() {
+        bail!("ffmpeg param-set prime produced no SPS/PPS");
+    }
+    Ok(params)
+}
+
+enum OneshotMode {
+    /// Default x264 headers — often SPS/PPS only for a single `-frames:v 1`.
+    ParamSets,
+    /// `repeat-headers=0` — emits a VCL NAL (IDR) per frame without inline SPS/PPS.
+    VclFrame,
+}
+
+fn run_oneshot_ffmpeg(
+    rgb24: &[u8],
+    width: u32,
+    height: u32,
+    fps: u32,
+    mode: OneshotMode,
+) -> Result<Vec<Vec<u8>>> {
+    let size = format!("{width}x{height}");
+    let fps_s = fps.to_string();
+    let mut args: Vec<&str> = vec![
+        "-nostdin",
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-f",
+        "rawvideo",
+        "-pix_fmt",
+        "rgb24",
+        "-s",
+        &size,
+        "-r",
+        &fps_s,
+        "-i",
+        "-",
+        "-frames:v",
+        "1",
+        "-an",
+        "-vf",
+        "format=yuv420p",
+        "-c:v",
+        "libx264",
+        "-pix_fmt",
+        "yuv420p",
+        "-preset",
+        "ultrafast",
+        "-tune",
+        "zerolatency",
+        "-profile:v",
+        "baseline",
+        "-bf",
+        "0",
+        "-g",
+        "1",
+        "-keyint_min",
+        "1",
+    ];
+    let x264_params = match mode {
+        OneshotMode::ParamSets => "annexb=1",
+        OneshotMode::VclFrame => "repeat-headers=0:annexb=1",
+    };
+    let x264_owned = x264_params.to_string();
+    args.push("-x264-params");
+    args.push(&x264_owned);
+    args.extend(["-bsf:v", "h264_mp4toannexb", "-f", "h264", "-"]);
+
+    let mut child = Command::new("ffmpeg");
+    child
+        .args(&args)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+
+    let mut child = child.spawn().context("failed to spawn one-shot ffmpeg")?;
+    {
+        let mut stdin = child.stdin.take().context("ffmpeg stdin missing")?;
+        stdin.write_all(rgb24)?;
+    }
+    let output = child
+        .wait_with_output()
+        .context("failed to read one-shot ffmpeg output")?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        bail!("one-shot ffmpeg failed: {stderr}");
+    }
+    let nalus = split_annex_b_nalus(&output.stdout);
+    if nalus.is_empty() {
+        bail!("one-shot ffmpeg produced no NALUs");
+    }
+    Ok(nalus)
+}
+
+/// One ffmpeg process per frame (slower, but reliable on Windows pipes).
+fn encode_frame_oneshot(
+    rgb24: &[u8],
+    width: u32,
+    height: u32,
+    fps: u32,
+) -> Result<Vec<Vec<u8>>> {
+    let nalus = run_oneshot_ffmpeg(rgb24, width, height, fps, OneshotMode::VclFrame)?;
+    if !nalus.iter().any(|n| nalu_type_of(n).map(is_vcl_nal_type).unwrap_or(false)) {
+        bail!(
+            "one-shot ffmpeg produced no VCL NAL (types: {:?})",
+            nalus
+                .iter()
+                .filter_map(|n| nalu_type_of(n))
+                .collect::<Vec<_>>()
+        );
+    }
+    Ok(nalus)
+}
+
+fn attach_param_nals(param_nals: &[Vec<u8>], mut vcl_nalus: Vec<Vec<u8>>) -> Result<Vec<Vec<u8>>> {
+    let has_params = vcl_nalus
+        .iter()
+        .any(|n| matches!(nalu_type_of(n), Some(7 | 8)));
+    let has_vcl = vcl_nalus
+        .iter()
+        .any(|n| nalu_type_of(n).map(is_vcl_nal_type).unwrap_or(false));
+    if !has_vcl {
+        bail!("encode output has no VCL NAL");
+    }
+    if has_params || param_nals.is_empty() {
+        return Ok(vcl_nalus);
+    }
+    let mut out = param_nals.to_vec();
+    out.append(&mut vcl_nalus);
+    Ok(out)
+}
+
+fn nalu_type_of(nalu: &[u8]) -> Option<u8> {
+    if let Some(i) = find_annex_b_start(nalu) {
+        let hdr = nalu.get(i + ANNEX_B_START_CODE.len())?;
+        return Some(hdr & 0x1F);
+    }
+    nalu.first().map(|b| b & 0x1F)
+}
+
+fn is_vcl_nal_type(nal_type: u8) -> bool {
+    matches!(nal_type, 1 | 5)
+}
+
+#[cfg(not(windows))]
+const WARMUP_FRAME_COUNT: usize = 2;
+
+#[cfg(not(windows))]
+fn try_spawn_ffmpeg(
+    width: u32,
+    height: u32,
+    fps: u32,
+    warmup_rgb24: Option<&[u8]>,
+) -> std::io::Result<EncoderBackend> {
+    let size = format!("{width}x{height}");
+    let fps_s = fps.to_string();
+    let gop = fps.max(1).to_string();
+
+    // `-` is more reliable than `pipe:0` / `pipe:1` on Windows for subprocess pipes.
+    let mut child = Command::new("ffmpeg");
+    child
+        .args([
+            "-nostdin",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-fflags",
+            "nobuffer+flush_packets",
+            "-f",
+            "rawvideo",
+            "-pix_fmt",
+            "rgb24",
+            "-s",
+            &size,
+            "-r",
+            &fps_s,
+            "-i",
+            "-",
+            "-an",
+            "-sn",
+            "-dn",
+            // rgb24 is 4:4:4; baseline profile requires 4:2:0 (yuv420p).
+            "-vf",
+            "format=yuv420p",
+            "-c:v",
+            "libx264",
+            "-pix_fmt",
+            "yuv420p",
+            "-preset",
+            "ultrafast",
+            "-tune",
+            "zerolatency",
+            "-profile:v",
+            "baseline",
+            "-bf",
+            "0",
+            "-g",
+            &gop,
+            "-keyint_min",
+            &gop,
+            "-sc_threshold",
+            "0",
+            "-x264-params",
+            "repeat-headers=1:annexb=1:nal-hrd=none:sync-lookahead=0:sliced-threads=0",
+            "-flags",
+            "+low_delay",
+            "-bsf:v",
+            "h264_mp4toannexb",
+            "-f",
+            "h264",
+            "-",
+        ])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+
+    let mut child = child.spawn()?;
+    let mut stdin = child.stdin.take().expect("ffmpeg stdin");
+    let stdout = child.stdout.take().expect("ffmpeg stdout");
+    if let Some(stderr) = child.stderr.take() {
+        thread::spawn(move || stderr_drain_loop(stderr));
+    }
+    let (tx, frame_rx) = mpsc::channel();
+    let reader_handle = thread::spawn(move || stdout_reader_loop(stdout, tx));
+
+    // Warm up the pipe encoder (>=2 frames); must run right before real capture (see stream_loop).
+    let frame_len = (width as usize) * (height as usize) * 3;
+    let black = vec![0u8; frame_len];
+    let warmup = match warmup_rgb24 {
+        Some(f) if f.len() == frame_len => f,
+        Some(_) => {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "warmup frame size mismatch",
+            ));
+        }
+        None => &black[..],
+    };
+    for _ in 0..WARMUP_FRAME_COUNT {
+        stdin.write_all(warmup)?;
+        stdin.flush()?;
+    }
+    // Let the reader flush warmup NALUs (non-blocking drain).
+    thread::sleep(Duration::from_millis(150));
+    while frame_rx.try_recv().is_ok() {}
+
+    Ok(EncoderBackend::Pipe {
+        child,
+        stdin,
+        frame_rx,
+        reader_handle,
+    })
+}
+
+#[cfg(not(windows))]
+fn stderr_drain_loop(mut stderr: ChildStderr) {
+    let mut buf = [0u8; 4096];
+    loop {
+        match stderr.read(&mut buf) {
+            Ok(0) | Err(_) => break,
+            Ok(n) => {
+                if let Ok(text) = std::str::from_utf8(&buf[..n]) {
+                    for line in text.lines() {
+                        if !line.is_empty() {
+                            eprintln!("ffmpeg: {line}");
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[cfg(not(windows))]
+fn stdout_reader_loop(mut stdout: ChildStdout, tx: Sender<Vec<Vec<u8>>>) {
+    let mut buf = Vec::with_capacity(256 * 1024);
+    let mut scratch = [0u8; 64 * 1024];
+    let mut pending: Vec<Vec<u8>> = Vec::new();
+
+    loop {
+        match stdout.read(&mut scratch) {
+            Ok(0) => break,
+            Ok(n) => {
+                buf.extend_from_slice(&scratch[..n]);
+                drain_complete_nalus(&mut buf, &mut pending, &tx);
+                drain_avcc_nalus(&mut buf, &mut pending, &tx);
+            }
+            Err(_) => break,
+        }
+    }
+
+    drain_complete_nalus(&mut buf, &mut pending, &tx);
+    drain_avcc_nalus(&mut buf, &mut pending, &tx);
+    try_emit_pending(&mut pending, &tx);
+}
+
+#[cfg(not(windows))]
+fn try_emit_pending(pending: &mut Vec<Vec<u8>>, tx: &Sender<Vec<Vec<u8>>>) {
+    if pending.is_empty() {
+        return;
+    }
+    let has_vcl = pending
+        .iter()
+        .any(|n| nalu_type_of(n).map(is_vcl_nal_type).unwrap_or(false));
+    if has_vcl {
+        let _ = tx.send(std::mem::take(pending));
+    }
+}
+
+/// Parse complete NALUs from `buf`; emit a batch when a VCL NAL (slice/IDR) is completed.
+#[cfg(not(windows))]
+fn drain_complete_nalus(buf: &mut Vec<u8>, pending: &mut Vec<Vec<u8>>, tx: &Sender<Vec<Vec<u8>>>) {
+    loop {
+        let Some((nalu, consumed)) = take_first_nalu(buf) else {
+            break;
+        };
+        buf.drain(..consumed);
+        pending.push(nalu);
+        try_emit_pending(pending, tx);
+    }
+}
+
+/// AVCC length-prefixed NALUs (fallback when Annex-B start codes are absent).
+#[cfg(not(windows))]
+fn drain_avcc_nalus(buf: &mut Vec<u8>, pending: &mut Vec<Vec<u8>>, tx: &Sender<Vec<Vec<u8>>>) {
+    if find_annex_b_start(buf).is_some() {
+        return;
+    }
+    loop {
+        if buf.len() < 4 {
+            break;
+        }
+        let len = u32::from_be_bytes([buf[0], buf[1], buf[2], buf[3]]) as usize;
+        if len == 0 || len > buf.len().saturating_sub(4) {
+            break;
+        }
+        let mut nalu = vec![0, 0, 0, 1];
+        nalu.extend_from_slice(&buf[4..4 + len]);
+        buf.drain(..4 + len);
+        pending.push(nalu);
+        try_emit_pending(pending, tx);
+    }
+}
+
+fn take_first_nalu(buf: &[u8]) -> Option<(Vec<u8>, usize)> {
+    let start = find_annex_b_start(buf)?;
+    let header_end = start + start_code_len_at(buf, start);
+    if header_end > buf.len() {
+        return None;
+    }
+    let search_from = header_end;
+    let next = find_annex_b_start(&buf[search_from..]).map(|p| search_from + p);
+    let end = next.unwrap_or(buf.len());
+    if end <= start {
+        return None;
+    }
+    Some((buf[start..end].to_vec(), end))
+}
+
+fn start_code_len_at(buf: &[u8], start: usize) -> usize {
+    if buf.get(start..start + 4) == Some(ANNEX_B_START_CODE) {
+        4
+    } else {
+        3
+    }
+}
+
+fn find_annex_b_start(buf: &[u8]) -> Option<usize> {
+    buf.windows(ANNEX_B_START_CODE.len())
+        .position(|w| w == ANNEX_B_START_CODE)
+}
+
+fn synthetic_nalus(width: u32, height: u32, frame_index: u64) -> Vec<Vec<u8>> {
+    let mut nalus = Vec::new();
+    nalus.push(vec![0, 0, 0, 1, 0x67, 0x42, 0x00, 0x1f]);
+    let mut idr = vec![0, 0, 0, 1, 0x65];
+    let payload_len = ((width as usize * height as usize) / 8).max(1400);
+    idr.extend(std::iter::repeat((frame_index & 0xff) as u8).take(payload_len));
+    nalus.push(idr);
+    nalus
+}
+
+/// Split a byte stream into Annex-B NALUs (each includes its start code).
+pub fn split_annex_b_nalus(bytes: &[u8]) -> Vec<Vec<u8>> {
+    let mut buf = bytes.to_vec();
+    let mut out = Vec::new();
+    while let Some((nalu, consumed)) = take_first_nalu(&buf) {
+        buf.drain(..consumed);
+        out.push(nalu);
+    }
+    out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn annex_b_split_roundtrip() {
+        let data = [0u8, 0, 0, 1, 0x67, 0x42, 0, 0, 0, 1, 0x65, 0x88];
+        let nalus = split_annex_b_nalus(&data);
+        assert_eq!(nalus.len(), 2);
+        assert_eq!(&nalus[0][..5], &[0, 0, 0, 1, 0x67]);
+    }
+
+    #[test]
+    #[ignore = "requires ffmpeg on PATH"]
+    fn ffmpeg_live_encode() {
+        let mut enc = FfmpegCliEncoder::open(64, 48, 30).expect("open ffmpeg");
+        let frame = vec![0u8; 64 * 48 * 3];
+        let (nalus, _) = enc.encode_frame(&frame, 0).expect("encode frame");
+        assert!(!nalus.is_empty());
+        assert!(
+            nalus
+                .iter()
+                .any(|n| nalu_type_of(n).map(is_vcl_nal_type).unwrap_or(false)),
+            "expected a VCL NAL in output"
+        );
+    }
+
+    #[test]
+    #[ignore = "requires ffmpeg on PATH"]
+    fn oneshot_vcl_frame_includes_slice() {
+        let frame = vec![0x80u8; 426 * 240 * 3];
+        let params = prime_param_nals(&frame, 426, 240, 15).expect("prime");
+        assert!(params.iter().any(|n| nalu_type_of(n) == Some(7)));
+        let vcl = encode_frame_oneshot(&frame, 426, 240, 15).expect("vcl encode");
+        assert!(vcl.iter().any(|n| nalu_type_of(n).map(is_vcl_nal_type).unwrap_or(false)));
+        let full = attach_param_nals(&params, vcl).expect("attach");
+        assert!(full.len() >= 3);
+    }
+
+    #[test]
+    #[ignore = "requires ffmpeg on PATH"]
+    fn ffmpeg_live_encode_640x360() {
+        let frame = vec![0u8; 640 * 360 * 3];
+        let mut enc =
+            FfmpegCliEncoder::open_with_warmup(640, 360, 30, Some(&frame)).expect("open ffmpeg");
+        let (nalus, _) = enc.encode_frame(&frame, 0).expect("encode frame");
+        assert!(!nalus.is_empty());
+    }
+
+    #[test]
+    fn synthetic_encoder_produces_vcl() {
+        let mut enc = FfmpegCliEncoder::open_synthetic(64, 48, 30);
+        let frame = vec![0u8; 64 * 48 * 3];
+        let (nalus, pts) = enc.encode_frame(&frame, 0).unwrap();
+        assert!(!nalus.is_empty());
+        assert_eq!(pts, 0);
+    }
+}

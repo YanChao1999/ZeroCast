@@ -1,0 +1,12 @@
+[package]
+name = "zerocast_core"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[lib]
+name = "zerocast_core"
+path = "src/lib.rs"
+
+[dependencies]
+

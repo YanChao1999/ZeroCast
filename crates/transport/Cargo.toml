@@ -1,0 +1,32 @@
+[package]
+name = "zerocast_transport"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[lib]
+name = "zerocast_transport"
+path = "src/lib.rs"
+
+[dependencies]
+zerocast_platform = { path = "../platform" }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "time"] }
+anyhow = "1.0"
+bytes = "1"
+minifb = "0.28"
+	# Lightweight RTP crate used by default (works with older toolchains)
+	rtp = "0.2"
+	# webrtc-util provides marshal/unmarshal traits used by `rtp`
+	webrtc-util = "0.2"
+ffmpeg-next = { version = "4.4", optional = true }
+
+# Note: webrtc-rs integration is planned but requires a newer Rust/Cargo.
+# To enable in the future, add:
+# webrtc = { git = "https://github.com/webrtc-rs/webrtc", optional = true }
+# and a matching feature in [features].
+
+[dev-dependencies]
+serial_test = "3"
+
+[features]
+libav = ["ffmpeg-next"]

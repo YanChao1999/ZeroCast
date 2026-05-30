@@ -1,0 +1,10 @@
+[package]
+name = "zerocast_desktop"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+zerocast_core = { path = "../../crates/core" }
+zerocast_transport = { path = "../../crates/transport" }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net"] }
+anyhow = "1.0"

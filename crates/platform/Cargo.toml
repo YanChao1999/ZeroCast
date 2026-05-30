@@ -1,0 +1,11 @@
+[package]
+name = "zerocast_platform"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+anyhow = "1.0"
+
+[target.'cfg(any(windows, target_os = "macos", target_os = "linux"))'.dependencies]
+scrap = "0.5"
