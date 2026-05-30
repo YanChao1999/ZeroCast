@@ -17,11 +17,17 @@ Build the workspace:
 cargo build --workspace
 ```
 
-Run the minimal desktop placeholder app:
+Run the desktop app (requires `ffmpeg` on PATH for H.264 streaming):
 
 ```bash
-cargo run -p zerocast_desktop
+# Terminal 1 — receiver (video window; match stream width/height)
+cargo run -p zerocast_desktop -- recv 0.0.0.0:5000 426 240
+
+# Terminal 2 — screen capture → encode → RTP
+cargo run -p zerocast_desktop -- stream 0.0.0.0:0 127.0.0.1:5000 426 240 15
 ```
+
+Install [ffmpeg](https://ffmpeg.org/download.html) on your PATH. On Windows/macOS/Linux the app uses the primary display via `scrap` (falls back to a test pattern if capture is unavailable).
 
 Run tests:
 
@@ -46,8 +52,10 @@ Recommended stack (summary)
 
 Project layout
 
-- `apps/desktop` — desktop app entrypoint (placeholder)
-- `crates/*` — workspace crates (core, discovery, transport, protocol, media, audio, video, renderer, ui, platform)
+- `apps/desktop` — desktop CLI (`send`, `recv`, `cap`, `stream`)
+- `crates/platform` — cross-platform screen capture (`scrap` on desktop OSes)
+- `crates/transport` — RTP/RTCP, H.264 encode (ffmpeg CLI), streaming loop
+- `crates/core` — shared core (minimal today)
 
 Docs for agents and maintainers
 - AI agent baseline: [AGENTS.md](AGENTS.md)

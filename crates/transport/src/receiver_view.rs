@@ -1,0 +1,95 @@
+//! Receiver path that decodes H.264 and shows a minifb window.
+
+use crate::decoder;
+use crate::display::{self, RgbFrame};
+use crate::Receiver;
+use anyhow::Result;
+use std::sync::mpsc;
+use std::thread;
+
+struct DecodeJob {
+    annex_b: Vec<u8>,
+    width: u32,
+    height: u32,
+}
+
+fn spawn_decode_thread(
+    decode_rx: mpsc::Receiver<DecodeJob>,
+    frame_tx: mpsc::SyncSender<RgbFrame>,
+) -> thread::JoinHandle<()> {
+    thread::spawn(move || {
+        let mut decode_errors = 0u32;
+        let mut frames_ok = 0u64;
+        while let Ok(mut job) = decode_rx.recv() {
+            while let Ok(newer) = decode_rx.try_recv() {
+                job = newer;
+            }
+            match decoder::decode_access_unit_rgb24(&job.annex_b, job.width, job.height) {
+                Ok((rgb24, w, h)) => {
+                    frames_ok += 1;
+                    if frames_ok == 1 {
+                        eprintln!("receiver: first frame decoded ({w}x{h})");
+                    }
+                    let frame = RgbFrame {
+                        width: w,
+                        height: h,
+                        rgb24,
+                    };
+                    if frame_tx.try_send(frame).is_err() {
+                        // Display is behind; drop this frame.
+                    }
+                }
+                Err(e) => {
+                    decode_errors += 1;
+                    if decode_errors <= 8 {
+                        eprintln!("decode error: {e:#}");
+                    }
+                }
+            }
+        }
+    })
+}
+
+pub async fn run_with_display(
+    receiver: Receiver,
+    expect_width: u32,
+    expect_height: u32,
+) -> Result<()> {
+    let (frame_tx, frame_rx) = mpsc::sync_channel::<RgbFrame>(2);
+    let (decode_tx, decode_rx) = mpsc::channel::<DecodeJob>();
+    let title = format!("ZeroCast {expect_width}x{expect_height}");
+
+    let decode_handle = spawn_decode_thread(decode_rx, frame_tx);
+
+    let mut frames_queued = 0u64;
+    let decode_tx_rtp = decode_tx.clone();
+
+    let rtp_handle = tokio::spawn(async move {
+        receiver
+            .run_frame_delivery(move |_ssrc, _rtp_ts, annex_b| {
+                let job = DecodeJob {
+                    annex_b,
+                    width: expect_width,
+                    height: expect_height,
+                };
+                if decode_tx_rtp.send(job).is_ok() {
+                    frames_queued += 1;
+                    if frames_queued == 1 || frames_queued % 60 == 0 {
+                        eprintln!("receiver: queued frame {frames_queued} for decode");
+                    }
+                }
+            })
+            .await
+    });
+
+    let display_result = tokio::task::spawn_blocking(move || {
+        display::run_blocking(frame_rx, expect_width, expect_height, &title)
+    })
+    .await?;
+
+    rtp_handle.await??;
+    drop(decode_tx);
+    let _ = decode_handle.join();
+    display_result?;
+    Ok(())
+}
