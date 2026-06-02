@@ -1,6 +1,6 @@
 use crate::daemon::create_daemon;
 use crate::local_registry;
-use crate::{parse_txt_properties, StreamAdvertisement, SERVICE_TYPE};
+use crate::{advertisement_from_txt, parse_txt_properties, StreamAdvertisement, SERVICE_TYPE};
 use anyhow::{bail, Context, Result};
 use mdns_sd::{ServiceEvent, ServiceInfo};
 use std::collections::HashMap;
@@ -43,17 +43,10 @@ fn insert_resolved(info: &ServiceInfo, by_instance: &mut HashMap<String, StreamA
         .iter()
         .map(|p| (p.key().to_string(), p.val_str().to_string()))
         .collect();
-    let (width, height, fps) = parse_txt_properties(&props);
+    let txt = parse_txt_properties(&props);
     by_instance.insert(
         instance.clone(),
-        StreamAdvertisement {
-            instance_name: instance,
-            host,
-            port,
-            width,
-            height,
-            fps,
-        },
+        advertisement_from_txt(instance, host, port, txt),
     );
 }
 
@@ -149,13 +142,27 @@ pub fn pick_receiver(streams: Vec<DiscoveredStream>) -> Result<StreamAdvertiseme
     eprintln!("Discovered ZeroCast receivers:");
     for (i, s) in streams.iter().enumerate() {
         let a = &s.advertisement;
+        let cap_note = if a.effective_max_width() != a.width
+            || a.effective_max_height() != a.height
+            || a.effective_max_fps(15) != a.effective_fps(15)
+        {
+            format!(
+                ", cap {}x{} @ {} fps",
+                a.effective_max_width(),
+                a.effective_max_height(),
+                a.effective_max_fps(15)
+            )
+        } else {
+            String::new()
+        };
         eprintln!(
-            "  [{i}] {} -> {} ({}x{} @ {} fps)",
+            "  [{i}] {} -> {} ({}x{} @ {} fps{})",
             a.instance_name,
             a.target_addr(),
             a.width,
             a.height,
-            a.fps
+            a.fps,
+            cap_note
         );
     }
     let index = if streams.len() == 1 {

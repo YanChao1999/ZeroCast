@@ -57,6 +57,9 @@ impl StreamPublisher {
             ("w".to_string(), width.to_string()),
             ("h".to_string(), height.to_string()),
             ("fps".to_string(), fps.to_string()),
+            ("max_w".to_string(), width.to_string()),
+            ("max_h".to_string(), height.to_string()),
+            ("max_fps".to_string(), fps.to_string()),
         ];
         let addrs = local_ip_addrs();
         let info = ServiceInfo::new(
@@ -87,6 +90,9 @@ impl StreamPublisher {
             width,
             height,
             fps,
+            max_width: width,
+            max_height: height,
+            max_fps: fps,
         };
         local_registry::write_receiver(&local_ad)?;
         eprintln!(
@@ -147,5 +153,8 @@ pub fn advertisement_from_register(
         width,
         height,
         fps,
+        max_width: width,
+        max_height: height,
+        max_fps: fps,
     }
 }

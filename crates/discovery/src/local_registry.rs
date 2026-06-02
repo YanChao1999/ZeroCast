@@ -51,6 +51,9 @@ pub fn write_receiver(ad: &StreamAdvertisement) -> Result<()> {
     writeln!(f, "w={}", ad.width)?;
     writeln!(f, "h={}", ad.height)?;
     writeln!(f, "fps={}", ad.fps)?;
+    writeln!(f, "max_w={}", ad.effective_max_width())?;
+    writeln!(f, "max_h={}", ad.effective_max_height())?;
+    writeln!(f, "max_fps={}", ad.effective_max_fps(15))?;
     Ok(())
 }
 
@@ -99,6 +102,9 @@ fn parse_entry(path: &Path, text: &str) -> Option<StreamAdvertisement> {
     let mut width = 0u32;
     let mut height = 0u32;
     let mut fps = 0u32;
+    let mut max_width = 0u32;
+    let mut max_height = 0u32;
+    let mut max_fps = 0u32;
 
     for line in text.lines() {
         let Some((k, v)) = line.split_once('=') else {
@@ -111,6 +117,9 @@ fn parse_entry(path: &Path, text: &str) -> Option<StreamAdvertisement> {
             "w" => width = v.trim().parse().unwrap_or(0),
             "h" => height = v.trim().parse().unwrap_or(0),
             "fps" => fps = v.trim().parse().unwrap_or(0),
+            "max_w" => max_width = v.trim().parse().unwrap_or(0),
+            "max_h" => max_height = v.trim().parse().unwrap_or(0),
+            "max_fps" => max_fps = v.trim().parse().unwrap_or(0),
             _ => {}
         }
     }
@@ -124,6 +133,9 @@ fn parse_entry(path: &Path, text: &str) -> Option<StreamAdvertisement> {
         width,
         height,
         fps,
+        max_width,
+        max_height,
+        max_fps,
     })
 }
 

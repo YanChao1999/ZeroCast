@@ -101,7 +101,7 @@ Roadmap (short)
 1. Desktop MVP — screen capture, H.264 encode, RTP streaming, rendering ✅
 2. **Phase 2a** — mDNS + same-PC discovery ✅ — [docs/PHASE-2A.md](docs/PHASE-2A.md)
 3. **Phase 1b** — encoder pipe + sender stats ✅ — [docs/PHASE-1B.md](docs/PHASE-1B.md)
-4. **Phase 1c (in progress)** — display detect, profiles, bitrate — [docs/PHASE-QOS.md](docs/PHASE-QOS.md)
+4. **Phase 1c (in progress)** — discover negotiation (`max_w`/`max_h` TXT) — [docs/PHASE-1C.md](docs/PHASE-1C.md), [docs/PHASE-QOS.md](docs/PHASE-QOS.md)
 5. Audio + A/V sync
 6. **Phase QoS** — adaptive ladder, HW encoders, fallback — [docs/PHASE-QOS.md](docs/PHASE-QOS.md)
 7. Android receiver, then sender
