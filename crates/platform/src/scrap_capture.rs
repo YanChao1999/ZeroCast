@@ -11,6 +11,8 @@ pub struct ScrapCapturer {
     out_width: u32,
     out_height: u32,
     scratch: Vec<u8>,
+    /// Last good RGB24 frame (DXGI returns WouldBlock when the desktop is unchanged).
+    last_frame: Option<Vec<u8>>,
 }
 
 impl ScrapCapturer {
@@ -30,7 +32,16 @@ impl ScrapCapturer {
             out_width,
             out_height,
             scratch: Vec::new(),
+            last_frame: None,
         })
+    }
+
+    fn reopen(&mut self) -> Result<()> {
+        let display = Display::primary().context("no primary display")?;
+        self.capturer = Capturer::new(display).context("failed to reopen screen capturer")?;
+        self.native_width = self.capturer.width() as u32;
+        self.native_height = self.capturer.height() as u32;
+        Ok(())
     }
 
     pub fn native_width(&self) -> u32 {
@@ -43,8 +54,9 @@ impl ScrapCapturer {
 
     pub fn capture_frame(&mut self) -> Result<Vec<u8>> {
         const SPIN: Duration = Duration::from_millis(1);
-        const MAX_WAIT: Duration = Duration::from_secs(2);
-        let deadline = std::time::Instant::now() + MAX_WAIT;
+        /// Wait briefly for DXGI to deliver a new desktop frame.
+        const MAX_WAIT_NEW: Duration = Duration::from_millis(250);
+        let deadline = std::time::Instant::now() + MAX_WAIT_NEW;
 
         loop {
             match self.capturer.frame() {
@@ -56,7 +68,7 @@ impl ScrapCapturer {
                     } else {
                         0
                     };
-                    return Ok(scale_bgra_to_rgb24(
+                    let rgb = scale_bgra_to_rgb24(
                         src,
                         self.native_width as usize,
                         src_h,
@@ -64,15 +76,37 @@ impl ScrapCapturer {
                         self.out_width,
                         self.out_height,
                         &mut self.scratch,
-                    ));
+                    );
+                    self.last_frame = Some(rgb.clone());
+                    return Ok(rgb);
                 }
                 Err(e) if e.kind() == WouldBlock => {
                     if std::time::Instant::now() >= deadline {
-                        anyhow::bail!("screen capture timed out waiting for frame");
+                        if let Some(last) = self.last_frame.clone() {
+                            return Ok(last);
+                        }
+                        // No frame yet — keep polling a bit longer on first capture.
+                        thread::sleep(SPIN);
+                        if std::time::Instant::now()
+                            >= deadline + Duration::from_secs(2)
+                        {
+                            self.reopen().context("reopen after initial capture stall")?;
+                            anyhow::bail!(
+                                "screen capture timed out waiting for first frame"
+                            );
+                        }
+                        continue;
                     }
                     thread::sleep(SPIN);
                 }
-                Err(e) => return Err(e).context("screen capture failed"),
+                Err(e) => {
+                    if self.last_frame.is_some() {
+                        eprintln!("screen capture: {e:#}, reusing last frame");
+                        let _ = self.reopen();
+                        return Ok(self.last_frame.clone().unwrap());
+                    }
+                    return Err(e).context("screen capture failed");
+                }
             }
         }
     }

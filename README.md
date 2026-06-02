@@ -21,11 +21,20 @@ cargo build --workspace
 
 Run the desktop app (requires `ffmpeg` on PATH for H.264 streaming):
 
-```bash
-# Terminal 1 — receiver (video window; match stream width/height)
-cargo run -p zerocast_desktop -- recv 0.0.0.0:5000 426 240
+**Zero-config (mDNS, Phase 2a):**
 
-# Terminal 2 — screen capture → encode → RTP
+```bash
+# Terminal 1 — receiver (publishes listen port + resolution via mDNS)
+cargo run -p zerocast_desktop -- recv 0.0.0.0:5000 426 240 15
+
+# Terminal 2 — sender (discovers receiver on the LAN)
+cargo run -p zerocast_desktop -- stream 0.0.0.0:0 --discover
+```
+
+**Manual IP (same machine or fixed address):**
+
+```bash
+cargo run -p zerocast_desktop -- recv 0.0.0.0:5000 426 240
 cargo run -p zerocast_desktop -- stream 0.0.0.0:0 127.0.0.1:5000 426 240 15
 ```
 
@@ -58,6 +67,7 @@ Project layout
 - `crates/platform` — cross-platform screen capture (`scrap` on desktop OSes)
 - `crates/transport` — RTP/RTCP, H.264 encode (ffmpeg CLI), streaming loop
 - `crates/core` — shared core (minimal today)
+- `crates/discovery` — mDNS-SD publish/browse (Phase 2a)
 
 Docs for agents and maintainers
 - AI agent baseline: [AGENTS.md](AGENTS.md)
@@ -67,7 +77,9 @@ Docs for agents and maintainers
 
 Roadmap (short)
 
-1. Desktop MVP — screen capture, H.264 encode, RTP streaming, rendering
-2. Audio + mDNS discovery + sync
-3. Android receiver, then sender
-4. iOS support (ReplayKit + VideoToolbox)
+1. Desktop MVP — screen capture, H.264 encode, RTP streaming, rendering ✅
+2. **Phase 2a** — mDNS + same-PC discovery ✅ — [docs/PHASE-2A.md](docs/PHASE-2A.md)
+3. Audio + A/V sync
+4. QoS — adaptive bitrate, frame drop/pacing under congestion, optional LAN traffic prioritization (DSCP)
+5. Android receiver, then sender
+6. iOS support (ReplayKit + VideoToolbox)

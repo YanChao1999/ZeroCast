@@ -6,6 +6,7 @@ license.workspace = true
 
 [dependencies]
 zerocast_core = { path = "../../crates/core" }
+zerocast_discovery = { path = "../../crates/discovery" }
 zerocast_transport = { path = "../../crates/transport" }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "net"] }
 anyhow = "1.0"
