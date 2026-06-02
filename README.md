@@ -49,7 +49,7 @@ cargo test --workspace
 Architecture (high level)
 
 - Shared Rust Core + Thin Native Platform Adapters + Cross-Platform UI
-- Media pipeline: Capture → GPU Texture → Hardware Encoder → RTP → Decoder → GPU Renderer
+- Media pipeline: Capture → GPU Texture → Hardware Encoder → RTP → **HW Decode** → GPU/HDMI (zero-copy target; MVP uses CPU RGB24 + minifb)
 - Discovery: mDNS; Transport: RTP over UDP; Control: QUIC/TCP
 
 Recommended stack (summary)

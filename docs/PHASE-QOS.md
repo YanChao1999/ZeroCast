@@ -89,7 +89,7 @@ Pi Zero W recv (426×240 @ 15 capable)
 - [x] Saner one-shot GOP (`-g fps`, SPS/PPS on IDR only)
 - [ ] ffmpeg hwaccel probe (NVENC / QSV / VideoToolbox)
 - [ ] Publish/display max capability in mDNS TXT (`max_w`, `max_h`, `max_fps`)
-- [ ] `ReceiverCapability` in core; discover uses `min(sender, recv)`
+- [ ] Wire discover: `ReceiverCapability` + `min(sender, recv)` (type in core)
 
 ### Embedded recv (Linux ARM)
 
@@ -97,7 +97,8 @@ Pi Zero W recv (426×240 @ 15 capable)
 - [ ] Headless `recv` service mode (no minifb) for edge deploy
 - [ ] mDNS TXT `class=embedded` + conservative defaults
 - [ ] Recv-side decode lag metric → RTCP or feedback channel for QoS
-- [ ] Optional: Pi 4+ V4L2 `h264_v4l2m2m` decode backend
+- [ ] Optional: Pi 4+ V4L2 `h264_v4l2m2m` decode → dmabuf → **DRM/KMS HDMI**
+- [ ] Pi Zero W: minimal-copy NV12 → KMS scale at 426×240 (no full RGB24 path)
 - [ ] Wi‑Fi aware defaults (start low on `wlan0`, slow ramp-up)
 
 ### Phase QoS v1 — closed loop
@@ -114,7 +115,54 @@ Pi Zero W recv (426×240 @ 15 capable)
 - [ ] Optional DSCP (`AF41`) on LAN
 - [ ] FEC or NACK policy (optional)
 
-### Phase 2c — GPU path
+### Phase 2c — Zero-copy GPU / HDMI path
+
+Today (many copies):
+
+```text
+SENDER   scrap BGRA → CPU RGB24 scale → ffmpeg libx264 → RTP
+RECV     RTP → Annex-B → ffmpeg decode → CPU RGB24 → minifb blit
+```
+
+Target (tier `CopyTier::ZeroCopy` / `HwAccel`):
+
+```text
+SENDER   GPU capture (DXGI/SCKit/PipeWire texture)
+           → HW encoder (NVENC/QSV/VT/VAAPI) → RTP
+RECV     RTP → HW decode (dmabuf / NV12)
+           → DRM/KMS plane → HDMI/DSI   (Linux embedded)
+           → GPU texture → wgpu/GL      (desktop / Pi 4+)
+```
+
+| Stage | Today | Zero-copy target | Platform notes |
+|-------|--------|------------------|----------------|
+| Capture | CPU RGB24 | GPU texture / dmabuf | DXGI, ScreenCaptureKit, PipeWire |
+| Encode | ffmpeg CPU | NVENC, QSV, VT, VAAPI | Same subprocess or native API |
+| Network | RTP UDP | RTP (+ pacing for Wi‑Fi) | Unchanged |
+| Decode | ffmpeg → RGB24 | V4L2 M2M, VA-API, VT, MediaCodec | Pi 4+: `h264_v4l2m2m`; Zero W: SW only |
+| Display | minifb CPU | **DRM/KMS direct**, HDMI | No full-frame RGB on Pi/desktop |
+
+**Receiver output modes** (`ReceiverOutput` in `zerocast_core`):
+
+| Mode | Use | Copy tier |
+|------|-----|-----------|
+| `CpuWindow` | Desktop dev (minifb) | `FullCpu` — current MVP |
+| `DrmKms` | Pi / embedded HDMI dongle | `HwAccel` — decode → KMS framebuffer |
+| `GpuTexture` | Future egui/wgpu UI | `HwAccel` → `ZeroCopy` |
+
+**Pi Zero W note:** No practical full zero-copy at 720p+; aim for **HwAccel** at 426×240 (V4L2 where available) or minimal-copy **NV12 → KMS scale**. QoS keeps bitrate low so Wi‑Fi and decode keep up.
+
+**TODO — zero-copy**
+
+- [ ] `VideoDecoder` trait + HW backends (symmetric to `VideoEncoder`)
+- [ ] Linux recv: `DrmKmsDisplay` backend (replace minifb on embedded)
+- [ ] Pi 4+: V4L2 `h264_v4l2m2m` decode → dmabuf → KMS
+- [ ] Desktop recv: VA-API / D3D11VA decode → wgpu texture
+- [ ] Sender: DXGI texture → NVENC (no RGB24 middle buffer)
+- [ ] Advertise `out=drm` / `tier=hw` in mDNS TXT for discover
+- [ ] Metric: `copy_tier` + decode_ms in recv stats → QoS
+
+Legacy section (sender capture only):
 
 - [ ] DXGI / ScreenCaptureKit texture → HW encoder (zero-copy)
 - [ ] Remove CPU RGB24 scale from hot path at high rungs

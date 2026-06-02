@@ -1,5 +1,7 @@
+mod pipeline;
 mod profile;
 
+pub use pipeline::{CopyTier, ReceiverOutput, SenderCapture};
 pub use profile::{ProfileKind, ReceiverCapability, StreamProfile};
 
 /// Workspace version string (`CARGO_PKG_VERSION` from the building crate).
