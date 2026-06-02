@@ -1,3 +1,7 @@
+mod profile;
+
+pub use profile::{ProfileKind, StreamProfile};
+
 /// Workspace version string (`CARGO_PKG_VERSION` from the building crate).
 pub fn version() -> &'static str {
     env!("CARGO_PKG_VERSION")

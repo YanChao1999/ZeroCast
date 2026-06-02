@@ -150,6 +150,27 @@ impl FfmpegCliEncoder {
             .saturating_mul(1_000_000_000u128)
             / (self.fps.max(1) as u128)
     }
+
+    /// Prepend cached SPS/PPS on first frame and each IDR (GOP boundary).
+    fn prepend_params_for_frame(&self, frame_index: u64) -> bool {
+        if self.param_nals.is_empty() {
+            return false;
+        }
+        let gop = self.fps.max(1) as u64;
+        frame_index == 0 || frame_index.is_multiple_of(gop)
+    }
+
+    fn maybe_attach_params(
+        &self,
+        nalus: Vec<Vec<u8>>,
+        frame_index: u64,
+    ) -> Result<Vec<Vec<u8>>> {
+        if self.prepend_params_for_frame(frame_index) {
+            attach_param_nals(&self.param_nals, nalus)
+        } else {
+            Ok(nalus)
+        }
+    }
 }
 
 impl VideoEncoder for FfmpegCliEncoder {
@@ -177,7 +198,7 @@ impl VideoEncoder for FfmpegCliEncoder {
                     }
                 }
                 let nalus = encode_frame_oneshot(rgb24, self.width, self.height, self.fps)?;
-                let nalus = attach_param_nals(&self.param_nals, nalus)?;
+                let nalus = self.maybe_attach_params(nalus, frame_index)?;
                 Ok((nalus, self.pts_ns(frame_index)))
             }
             EncoderBackend::Pipe { stdin, frame_rx, .. } => {
@@ -188,13 +209,13 @@ impl VideoEncoder for FfmpegCliEncoder {
 
                 match frame_rx.recv_timeout(PIPE_ATTEMPT_TIMEOUT) {
                     Ok(nalus) if !nalus.is_empty() => {
-                        let nalus = attach_param_nals(&self.param_nals, nalus)?;
+                        let nalus = self.maybe_attach_params(nalus, frame_index)?;
                         Ok((nalus, self.pts_ns(frame_index)))
                     }
                     Ok(_) | Err(RecvTimeoutError::Timeout) => {
                         self.switch_to_oneshot();
                         let nalus = encode_frame_oneshot(rgb24, self.width, self.height, self.fps)?;
-                        let nalus = attach_param_nals(&self.param_nals, nalus)?;
+                        let nalus = self.maybe_attach_params(nalus, frame_index)?;
                         Ok((nalus, self.pts_ns(frame_index)))
                     }
                     Err(RecvTimeoutError::Disconnected) => {
@@ -250,6 +271,7 @@ fn run_oneshot_ffmpeg(
 ) -> Result<Vec<Vec<u8>>> {
     let size = format!("{width}x{height}");
     let fps_s = fps.to_string();
+    let gop = fps.max(1).to_string();
     let mut args: Vec<&str> = vec![
         "-nostdin",
         "-hide_banner",
@@ -283,9 +305,9 @@ fn run_oneshot_ffmpeg(
         "-bf",
         "0",
         "-g",
-        "1",
+        &gop,
         "-keyint_min",
-        "1",
+        &gop,
     ];
     let x264_params = match mode {
         OneshotMode::ParamSets => "annexb=1",

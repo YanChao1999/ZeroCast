@@ -34,5 +34,9 @@ stream stats: 14.2 fps, 12 ms encode avg, 850 kbps (last 30 frames)
 
 - [x] Windows pipe encoder with oneshot fallback
 - [x] Periodic sender stats in `stream` loop
-- [ ] Hardware encoder (NVENC/QSV) — future
+- [ ] Hardware encoder (NVENC/QSV) — see [PHASE-QOS.md](PHASE-QOS.md)
 - [ ] Persistent decoder on recv — future
+
+## Next (1c / QoS foundation)
+
+See [PHASE-QOS.md](PHASE-QOS.md) for profile ladder and QoS TODO.
