@@ -1,0 +1,12 @@
+[package]
+name = "zerocast_discovery"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+license.workspace = true
+description = "mDNS service discovery for ZeroCast (Phase 2a)"
+
+[dependencies]
+anyhow = "1.0"
+mdns-sd = "0.13"
+tokio = { version = "1", features = ["rt", "sync", "time"] }

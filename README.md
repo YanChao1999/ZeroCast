@@ -58,6 +58,7 @@ Project layout
 - `crates/platform` — cross-platform screen capture (`scrap` on desktop OSes)
 - `crates/transport` — RTP/RTCP, H.264 encode (ffmpeg CLI), streaming loop
 - `crates/core` — shared core (minimal today)
+- `crates/discovery` — mDNS-SD publish/browse (Phase 2a)
 
 Docs for agents and maintainers
 - AI agent baseline: [AGENTS.md](AGENTS.md)
@@ -67,7 +68,8 @@ Docs for agents and maintainers
 
 Roadmap (short)
 
-1. Desktop MVP — screen capture, H.264 encode, RTP streaming, rendering
-2. Audio + mDNS discovery + sync
-3. Android receiver, then sender
-4. iOS support (ReplayKit + VideoToolbox)
+1. Desktop MVP — screen capture, H.264 encode, RTP streaming, rendering ✅
+2. **Phase 2a (in progress)** — mDNS discovery — [docs/PHASE-2A.md](docs/PHASE-2A.md)
+3. Audio + A/V sync
+4. Android receiver, then sender
+5. iOS support (ReplayKit + VideoToolbox)
