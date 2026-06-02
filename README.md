@@ -31,11 +31,32 @@ cargo run -p zerocast_desktop -- recv 0.0.0.0:5000 426 240 15
 cargo run -p zerocast_desktop -- stream 0.0.0.0:0 --discover
 ```
 
+**Profiles (`low` | `med` | `high` | `auto`)** — same dimensions on both sides; `auto` uses your primary display (e.g. 1920×1080 @ 60):
+
+```bash
+# Pi Zero W–class / low bandwidth (426×240 @ 15 fps) — recommended for same-PC smoke tests
+cargo run -p zerocast_desktop -- recv 0.0.0.0:5000 --profile low
+cargo run -p zerocast_desktop -- stream 0.0.0.0:0 --discover --profile low
+
+# 720p30
+cargo run -p zerocast_desktop -- recv 0.0.0.0:5000 --profile med
+cargo run -p zerocast_desktop -- stream 0.0.0.0:0 --discover --profile med
+
+# Full display resolution (capped to 1080p, refresh up to 60 Hz)
+cargo run -p zerocast_desktop -- recv 0.0.0.0:5000 --profile auto
+cargo run -p zerocast_desktop -- stream 0.0.0.0:0 --discover --profile auto
+```
+
+With `--discover` and no `--profile`, the sender uses the receiver’s advertised width/height/fps from mDNS.
+
 **Manual IP (same machine or fixed address):**
 
 ```bash
-cargo run -p zerocast_desktop -- recv 0.0.0.0:5000 426 240
+cargo run -p zerocast_desktop -- recv 0.0.0.0:5000 426 240 15
 cargo run -p zerocast_desktop -- stream 0.0.0.0:0 127.0.0.1:5000 426 240 15
+
+# Or pick a profile on the sender only (receiver window size is still from recv args)
+cargo run -p zerocast_desktop -- stream 0.0.0.0:0 127.0.0.1:5000 --profile low
 ```
 
 Install [ffmpeg](https://ffmpeg.org/download.html) on your PATH. On Windows/macOS/Linux the app uses the primary display via `scrap` (falls back to a test pattern if capture is unavailable).
