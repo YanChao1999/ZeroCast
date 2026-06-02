@@ -112,6 +112,7 @@ mod tests {
 
     /// Registers a receiver and browses on the same host (needs UDP 5353 / multicast).
     #[tokio::test]
+    #[ignore = "requires mDNS multicast (UDP 5353); run locally with --ignored"]
     async fn mdns_register_and_browse_roundtrip() {
         let _publisher = publish::StreamPublisher::register(
             "zerocast-test",

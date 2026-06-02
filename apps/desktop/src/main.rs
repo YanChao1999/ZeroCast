@@ -110,19 +110,22 @@ async fn main() -> anyhow::Result<()> {
                 .map(|s| s.parse().expect("fps must be a number"))
                 .unwrap_or(zerocast_transport::DEFAULT_FPS);
 
-            if !no_mdns {
+            let publisher = if !no_mdns {
                 let port = zerocast_discovery::listen_port(&local)?;
                 let instance = zerocast_discovery::local_instance_name();
-                let _publisher = zerocast_discovery::StreamPublisher::register(
+                Some(zerocast_discovery::StreamPublisher::register(
                     &instance, port, width, height, fps,
-                )?;
-            }
+                )?)
+            } else {
+                None
+            };
 
             println!(
                 "Receiver with video window ({}x{}, Escape to quit): {}",
                 width, height, local
             );
             zerocast_transport::recv_with_display(&local, width, height).await?;
+            drop(publisher);
         }
         Some("recv-log") => {
             let local = args.next().expect("missing local arg (e.g. 0.0.0.0:5000)");

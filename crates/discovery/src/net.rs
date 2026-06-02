@@ -40,8 +40,6 @@ pub fn local_ip_addrs() -> Vec<IpAddr> {
     }
     if out.is_empty() {
         out.push(IpAddr::V4(Ipv4Addr::LOCALHOST));
-    } else {
-        out.push(IpAddr::V4(Ipv4Addr::LOCALHOST));
     }
     out
 }
