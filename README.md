@@ -9,7 +9,7 @@ Goals
 - Native performance, low latency, small binaries
 - LAN-only: no cloud, no accounts
 - Cross-platform: Windows, macOS, Linux, Android, iOS
-- Could deploy on some edge device
+- Edge receivers: Linux ARM boards (e.g. Raspberry Pi Zero W over Wi‑Fi)
 
 Quick start
 
@@ -31,11 +31,32 @@ cargo run -p zerocast_desktop -- recv 0.0.0.0:5000 426 240 15
 cargo run -p zerocast_desktop -- stream 0.0.0.0:0 --discover
 ```
 
+**Profiles (`low` | `med` | `high` | `auto`)** — same dimensions on both sides; `auto` uses your primary display (e.g. 1920×1080 @ 60):
+
+```bash
+# Pi Zero W–class / low bandwidth (426×240 @ 15 fps) — recommended for same-PC smoke tests
+cargo run -p zerocast_desktop -- recv 0.0.0.0:5000 --profile low
+cargo run -p zerocast_desktop -- stream 0.0.0.0:0 --discover --profile low
+
+# 720p30
+cargo run -p zerocast_desktop -- recv 0.0.0.0:5000 --profile med
+cargo run -p zerocast_desktop -- stream 0.0.0.0:0 --discover --profile med
+
+# Full display resolution (capped to 1080p, refresh up to 60 Hz)
+cargo run -p zerocast_desktop -- recv 0.0.0.0:5000 --profile auto
+cargo run -p zerocast_desktop -- stream 0.0.0.0:0 --discover --profile auto
+```
+
+With `--discover` and no `--profile`, the sender uses the receiver’s advertised width/height/fps from mDNS.
+
 **Manual IP (same machine or fixed address):**
 
 ```bash
-cargo run -p zerocast_desktop -- recv 0.0.0.0:5000 426 240
+cargo run -p zerocast_desktop -- recv 0.0.0.0:5000 426 240 15
 cargo run -p zerocast_desktop -- stream 0.0.0.0:0 127.0.0.1:5000 426 240 15
+
+# Or pick a profile on the sender only (receiver window size is still from recv args)
+cargo run -p zerocast_desktop -- stream 0.0.0.0:0 127.0.0.1:5000 --profile low
 ```
 
 Install [ffmpeg](https://ffmpeg.org/download.html) on your PATH. On Windows/macOS/Linux the app uses the primary display via `scrap` (falls back to a test pattern if capture is unavailable).
@@ -49,7 +70,7 @@ cargo test --workspace
 Architecture (high level)
 
 - Shared Rust Core + Thin Native Platform Adapters + Cross-Platform UI
-- Media pipeline: Capture → GPU Texture → Hardware Encoder → RTP → Decoder → GPU Renderer
+- Media pipeline: Capture → GPU Texture → Hardware Encoder → RTP → **HW Decode** → GPU/HDMI (zero-copy target; MVP uses CPU RGB24 + minifb)
 - Discovery: mDNS; Transport: RTP over UDP; Control: QUIC/TCP
 
 Recommended stack (summary)
@@ -79,7 +100,10 @@ Roadmap (short)
 
 1. Desktop MVP — screen capture, H.264 encode, RTP streaming, rendering ✅
 2. **Phase 2a** — mDNS + same-PC discovery ✅ — [docs/PHASE-2A.md](docs/PHASE-2A.md)
-3. Audio + A/V sync
-4. QoS — adaptive bitrate, frame drop/pacing under congestion, optional LAN traffic prioritization (DSCP)
-5. Android receiver, then sender
-6. iOS support (ReplayKit + VideoToolbox)
+3. **Phase 1b** — encoder pipe + sender stats ✅ — [docs/PHASE-1B.md](docs/PHASE-1B.md)
+4. **Phase 1c (in progress)** — display detect, profiles, bitrate — [docs/PHASE-QOS.md](docs/PHASE-QOS.md)
+5. Audio + A/V sync
+6. **Phase QoS** — adaptive ladder, HW encoders, fallback — [docs/PHASE-QOS.md](docs/PHASE-QOS.md)
+7. Android receiver, then sender
+8. iOS support (ReplayKit + VideoToolbox)
+9. **Embedded recv** — Linux ARM (Pi Zero W, Wi‑Fi) — [docs/PHASE-QOS.md](docs/PHASE-QOS.md#embedded-receivers-linux-arm--wifi)

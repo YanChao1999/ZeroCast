@@ -1636,6 +1636,7 @@ dependencies = [
  "tokio",
  "zerocast_core",
  "zerocast_discovery",
+ "zerocast_platform",
  "zerocast_transport",
 ]
 

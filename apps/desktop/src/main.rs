@@ -1,3 +1,4 @@
+use anyhow::Context;
 use std::env;
 
 fn take_flag(args: &mut Vec<String>, flag: &str) -> bool {
@@ -7,6 +8,62 @@ fn take_flag(args: &mut Vec<String>, flag: &str) -> bool {
     } else {
         false
     }
+}
+
+fn require_option_arg(
+    args: &mut Vec<String>,
+    flag: &str,
+    value_hint: &str,
+) -> anyhow::Result<Option<String>> {
+    let idx = match args.iter().position(|a| a == flag) {
+        Some(i) => i,
+        None => return Ok(None),
+    };
+    args.remove(idx);
+    if idx < args.len() && !args[idx].starts_with('-') {
+        Ok(Some(args.remove(idx)))
+    } else {
+        anyhow::bail!("{flag} requires a value ({value_hint})")
+    }
+}
+
+fn parse_profile_kind(name: &str) -> anyhow::Result<zerocast_core::ProfileKind> {
+    zerocast_core::ProfileKind::parse(name).ok_or_else(|| {
+        anyhow::anyhow!("--profile requires low|med|high|auto (got '{name}')")
+    })
+}
+
+fn log_primary_display() -> zerocast_platform::PrimaryDisplay {
+    match zerocast_platform::primary_display() {
+        Ok(d) => {
+            eprintln!(
+                "display: primary {}x{} @ {} Hz (QoS ceiling)",
+                d.width, d.height, d.refresh_hz
+            );
+            d
+        }
+        Err(e) => {
+            eprintln!("display: unavailable ({e:#}), assuming 1920x1080 @ 60 Hz");
+            zerocast_platform::PrimaryDisplay::stub()
+        }
+    }
+}
+
+fn profile_dims(
+    kind: zerocast_core::ProfileKind,
+    display: &zerocast_platform::PrimaryDisplay,
+) -> (u32, u32, u32) {
+    let p = zerocast_core::StreamProfile::from_kind(
+        kind,
+        display.width,
+        display.height,
+        display.refresh_hz,
+    );
+    eprintln!(
+        "profile: {} ({}x{} @ {} fps)",
+        p.name, p.width, p.height, p.fps
+    );
+    (p.width, p.height, p.fps)
 }
 
 #[tokio::main]
@@ -38,6 +95,13 @@ async fn main() -> anyhow::Result<()> {
         Some("stream") => {
             let mut argv: Vec<String> = args.collect();
             let discover = take_flag(&mut argv, "--discover");
+            let profile_name =
+                require_option_arg(&mut argv, "--profile", "low|med|high|auto")?;
+            let profile_kind = match profile_name.as_deref() {
+                None => None,
+                Some(name) => Some(parse_profile_kind(name)?),
+            };
+            let display = log_primary_display();
             let local = if argv.is_empty() {
                 "0.0.0.0:0".into()
             } else {
@@ -52,12 +116,20 @@ async fn main() -> anyhow::Result<()> {
                 let ad = zerocast_discovery::pick_receiver(found)?;
                 ad.validate_dimensions()?;
                 let target = ad.target_addr();
-                let fps = ad.effective_fps(zerocast_transport::DEFAULT_FPS);
+                let (width, height, fps) = if let Some(kind) = profile_kind {
+                    profile_dims(kind, &display)
+                } else {
+                    (
+                        ad.width,
+                        ad.height,
+                        ad.effective_fps(zerocast_transport::DEFAULT_FPS),
+                    )
+                };
                 eprintln!(
                     "mdns: streaming to {} ({}x{} @ {} fps)",
-                    target, ad.width, ad.height, fps
+                    target, width, height, fps
                 );
-                (target, ad.width, ad.height, fps)
+                (target, width, height, fps)
             } else {
                 let target = argv
                     .first()
@@ -66,23 +138,35 @@ async fn main() -> anyhow::Result<()> {
                         anyhow::anyhow!(
                             "stream requires <target> or --discover\n  \
                              e.g. stream 0.0.0.0:0 192.168.1.10:5000 426 240 15\n  \
-                             e.g. stream 0.0.0.0:0 --discover"
+                             e.g. stream 0.0.0.0:0 --discover\n  \
+                             e.g. stream 0.0.0.0:0 192.168.1.10:5000 --profile auto"
                         )
                     })?;
                 argv.remove(0);
-                let width = argv
-                    .first()
-                    .map(|s| s.parse().expect("width"))
-                    .unwrap_or(zerocast_transport::DEFAULT_WIDTH);
-                let height = argv
-                    .get(1)
-                    .map(|s| s.parse().expect("height"))
-                    .unwrap_or(zerocast_transport::DEFAULT_HEIGHT);
-                let fps = argv
-                    .get(2)
-                    .map(|s| s.parse().expect("fps"))
-                    .unwrap_or(zerocast_transport::DEFAULT_FPS);
-                (target, width, height, fps)
+                if let Some(kind) = profile_kind {
+                    let (w, h, f) = profile_dims(kind, &display);
+                    (target, w, h, f)
+                } else {
+                    let width = argv
+                        .first()
+                        .map(|s| s.parse())
+                        .transpose()
+                        .context("width must be a number")?
+                        .unwrap_or(zerocast_transport::DEFAULT_WIDTH);
+                    let height = argv
+                        .get(1)
+                        .map(|s| s.parse())
+                        .transpose()
+                        .context("height must be a number")?
+                        .unwrap_or(zerocast_transport::DEFAULT_HEIGHT);
+                    let fps = argv
+                        .get(2)
+                        .map(|s| s.parse())
+                        .transpose()
+                        .context("fps must be a number")?
+                        .unwrap_or(zerocast_transport::DEFAULT_FPS);
+                    (target, width, height, fps)
+                }
             };
 
             println!(
@@ -95,20 +179,45 @@ async fn main() -> anyhow::Result<()> {
         Some("recv") => {
             let mut argv: Vec<String> = args.collect();
             let no_mdns = take_flag(&mut argv, "--no-mdns");
-            if argv.len() < 3 {
-                anyhow::bail!(
-                    "recv requires <local> <width> <height> [fps]\n  \
-                     e.g. recv 0.0.0.0:5000 426 240 15\n  \
-                     mDNS publish is on by default (use --no-mdns to disable)"
-                );
-            }
-            let local = argv.remove(0);
-            let width: u32 = argv.remove(0).parse().expect("width must be a number");
-            let height: u32 = argv.remove(0).parse().expect("height must be a number");
-            let fps: u32 = argv
-                .first()
-                .map(|s| s.parse().expect("fps must be a number"))
-                .unwrap_or(zerocast_transport::DEFAULT_FPS);
+            let profile_name =
+                require_option_arg(&mut argv, "--profile", "low|med|high|auto")?;
+            let profile_kind = match profile_name.as_deref() {
+                None => None,
+                Some(name) => Some(parse_profile_kind(name)?),
+            };
+
+            let (local, width, height, fps) = if let Some(kind) = profile_kind {
+                let local = argv.first().cloned().ok_or_else(|| {
+                    anyhow::anyhow!(
+                        "recv with --profile requires <local>\n  \
+                         e.g. recv 0.0.0.0:5000 --profile auto\n  \
+                         e.g. recv 0.0.0.0:5000 --profile low"
+                    )
+                })?;
+                argv.remove(0);
+                let display = log_primary_display();
+                let (w, h, f) = profile_dims(kind, &display);
+                (local, w, h, f)
+            } else {
+                if argv.len() < 3 {
+                    anyhow::bail!(
+                        "recv requires <local> <width> <height> [fps]\n  \
+                         e.g. recv 0.0.0.0:5000 426 240 15\n  \
+                         e.g. recv 0.0.0.0:5000 --profile auto\n  \
+                         mDNS publish is on by default (use --no-mdns to disable)"
+                    );
+                }
+                let local = argv.remove(0);
+                let width: u32 = argv.remove(0).parse().context("width must be a number")?;
+                let height: u32 = argv.remove(0).parse().context("height must be a number")?;
+                let fps: u32 = argv
+                    .first()
+                    .map(|s| s.parse())
+                    .transpose()
+                    .context("fps must be a number")?
+                    .unwrap_or(zerocast_transport::DEFAULT_FPS);
+                (local, width, height, fps)
+            };
 
             let publisher = if !no_mdns {
                 let port = zerocast_discovery::listen_port(&local)?;
@@ -139,8 +248,10 @@ async fn main() -> anyhow::Result<()> {
                  zerocast_desktop send <local> <target>\n  \
                  zerocast_desktop cap <local> <target>\n  \
                  zerocast_desktop stream <local> <target> [width] [height] [fps]\n  \
-                 zerocast_desktop stream <local> --discover\n  \
+                 zerocast_desktop stream <local> --discover [--profile low|med|high|auto]\n  \
+                 zerocast_desktop stream <local> <target> --profile auto\n  \
                  zerocast_desktop recv <local> <width> <height> [fps] [--no-mdns]\n  \
+                 zerocast_desktop recv <local> --profile low|med|high|auto [--no-mdns]\n  \
                  zerocast_desktop recv-log <local>\n  \
                  zerocast_desktop --version\n\n\
                  Zero-config: start recv first (publishes via mDNS), then stream --discover.\n\n\

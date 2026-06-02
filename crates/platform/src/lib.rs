@@ -7,6 +7,10 @@ mod stub;
 #[cfg(any(windows, target_os = "macos", target_os = "linux"))]
 mod scrap_capture;
 
+mod display;
+
+pub use display::{primary_display, PrimaryDisplay};
+
 use anyhow::Result;
 
 /// Captures screen pixels as RGB24 for the video encoder.
