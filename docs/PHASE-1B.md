@@ -20,14 +20,34 @@ Same as today:
 
 ```powershell
 cargo run -p zerocast_desktop -- recv 0.0.0.0:5000 426 240 15
+cargo run -p zerocast_desktop -- recv 0.0.0.0:5000 --profile low
 cargo run -p zerocast_desktop -- stream 0.0.0.0:0 --discover
+cargo run -p zerocast_desktop -- stream 0.0.0.0:0 --discover --profile low
 ```
 
 Look for:
 
 ```text
 encoder: live ffmpeg pipe (426x240 @ 15 fps)
-stream stats: 14.2 fps, 12 ms encode avg, 850 kbps (last 30 frames)
+stream: frame 0 3 nalus [type 7 22b, type 8 4b, type 5 20106b]
+stream stats: 12.9 fps, 1 ms encode avg, 2102 kbps (last 30 frames)
+```
+
+## Test plan
+
+- [x] `cargo test --workspace`
+- [x] Same PC: `recv --profile low` + `stream 0.0.0.0:0 --discover --profile low` (330+ frames, no decode errors)
+- [x] Same PC: `recv` + `stream --discover` with explicit `426 240 15` (300+ frames)
+- [x] `recv --profile auto` / `stream --discover --profile auto` smoke test (1080p60; ~7 fps, LAN bandwidth heavy)
+- [x] Pipe mode at 426×240 @ 15 fps (live pipe; ~1 ms encode, ~2 Mbps; no frame-0 oneshot fallback in latest run)
+- [x] NAL sanity: 3 NALs per frame (SPS ~22 B, PPS ~4 B, one IDR slice); recv shows no `non-existing PPS` errors
+
+Manual commands:
+
+```powershell
+cargo test --workspace
+cargo run -p zerocast_desktop -- recv 0.0.0.0:5000 --profile low
+cargo run -p zerocast_desktop -- stream 0.0.0.0:0 --discover --profile low
 ```
 
 ## Status
