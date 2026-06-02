@@ -82,7 +82,7 @@ async fn main() -> anyhow::Result<()> {
                  zerocast_desktop send <local> <target>\n  \
                  zerocast_desktop cap <local> <target>\n  \
                  zerocast_desktop stream <local> <target> [width] [height] [fps]\n  \
-                 zerocast_desktop recv <local> [width] [height]\n  \
+                 zerocast_desktop recv <local> <width> <height>\n  \
                  zerocast_desktop recv-log <local>\n  \
                  zerocast_desktop --version\n\n\
                  Requires `ffmpeg` on PATH for real H.264 (libx264). \
