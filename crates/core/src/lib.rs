@@ -1,5 +1,11 @@
+/// Workspace version string (`CARGO_PKG_VERSION` from the building crate).
 pub fn version() -> &'static str {
-    "zerocast-core 0.1.0"
+    env!("CARGO_PKG_VERSION")
+}
+
+/// Crate name and version, e.g. `zerocast_desktop 0.2.0`.
+pub fn name_and_version() -> String {
+    format!("{} {}", env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION"))
 }
 
 #[cfg(test)]
@@ -7,7 +13,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn version_string() {
-        assert!(version().contains("zerocast-core"));
+    fn version_matches_workspace() {
+        assert_eq!(version(), "0.2.0");
     }
 }

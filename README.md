@@ -1,5 +1,7 @@
 # ZeroCast — Cross-Platform Zero-Config LAN Screen Casting
 
+**Version 0.2.0** (workspace; see root `Cargo.toml` `[workspace.package]`)
+
 Lightweight, zero-configuration LAN screen casting built around a shared Rust core and thin platform adapters.
 
 Goals
