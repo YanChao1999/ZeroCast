@@ -435,6 +435,10 @@ async fn stream_loop(
     let rtcp_interval = std::time::Duration::from_secs(1);
     let mut next_rtcp = std::time::Instant::now();
     let mut frame_index = 0u64;
+    let mut stats_window_start = std::time::Instant::now();
+    let mut stats_frames = 0u64;
+    let mut stats_encode_ms = 0f64;
+    let mut stats_bytes = 0u64;
 
     loop {
         if max_frames > 0 && frame_index >= max_frames {
@@ -453,7 +457,13 @@ async fn stream_loop(
         } else {
             screen.capture_frame()?
         };
+        let encode_start = std::time::Instant::now();
         let (nalus, pts_ns) = video_encoder.encode_frame(&frame, frame_index)?;
+        let encode_ms = encode_start.elapsed().as_secs_f64() * 1000.0;
+        let payload_bytes: u64 = nalus.iter().map(|n| n.len() as u64).sum();
+        stats_frames += 1;
+        stats_encode_ms += encode_ms;
+        stats_bytes += payload_bytes;
         if frame_index < 3 {
             let summary: Vec<String> = nalus
                 .iter()
@@ -482,11 +492,29 @@ async fn stream_loop(
         let elapsed = frame_start.elapsed();
         if frame_index == 1 || frame_index % 30 == 0 {
             eprintln!(
-                "sent frame {} ({} nalus, {:.0} ms)",
+                "sent frame {} ({} nalus, {:.0} ms encode, {:.0} ms total)",
                 frame_index,
                 nalus.len(),
+                encode_ms,
                 elapsed.as_secs_f64() * 1000.0
             );
+        }
+        if frame_index % 30 == 0 {
+            let window_secs = stats_window_start.elapsed().as_secs_f64().max(0.001);
+            let fps_actual = stats_frames as f64 / window_secs;
+            let avg_encode = stats_encode_ms / stats_frames.max(1) as f64;
+            let kbps = (stats_bytes as f64 * 8.0 / 1000.0) / window_secs;
+            eprintln!(
+                "stream stats: {:.1} fps, {:.0} ms encode avg, {:.0} kbps (last {} frames)",
+                fps_actual,
+                avg_encode,
+                kbps,
+                stats_frames
+            );
+            stats_window_start = std::time::Instant::now();
+            stats_frames = 0;
+            stats_encode_ms = 0.0;
+            stats_bytes = 0;
         }
         if elapsed < frame_duration {
             tokio::time::sleep(frame_duration - elapsed).await;

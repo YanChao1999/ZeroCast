@@ -79,7 +79,8 @@ Roadmap (short)
 
 1. Desktop MVP — screen capture, H.264 encode, RTP streaming, rendering ✅
 2. **Phase 2a** — mDNS + same-PC discovery ✅ — [docs/PHASE-2A.md](docs/PHASE-2A.md)
-3. Audio + A/V sync
-4. QoS — adaptive bitrate, frame drop/pacing under congestion, optional LAN traffic prioritization (DSCP)
-5. Android receiver, then sender
-6. iOS support (ReplayKit + VideoToolbox)
+3. **Phase 1b (in progress)** — encoder perf + sender stats — [docs/PHASE-1B.md](docs/PHASE-1B.md)
+4. Audio + A/V sync
+5. QoS — adaptive bitrate, frame drop/pacing under congestion, optional LAN traffic prioritization (DSCP)
+6. Android receiver, then sender
+7. iOS support (ReplayKit + VideoToolbox)
