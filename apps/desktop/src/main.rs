@@ -1,3 +1,4 @@
+use anyhow::Context;
 use std::env;
 
 fn take_flag(args: &mut Vec<String>, flag: &str) -> bool {
@@ -162,20 +163,48 @@ async fn main() -> anyhow::Result<()> {
         Some("recv") => {
             let mut argv: Vec<String> = args.collect();
             let no_mdns = take_flag(&mut argv, "--no-mdns");
-            if argv.len() < 3 {
-                anyhow::bail!(
-                    "recv requires <local> <width> <height> [fps]\n  \
-                     e.g. recv 0.0.0.0:5000 426 240 15\n  \
-                     mDNS publish is on by default (use --no-mdns to disable)"
-                );
-            }
-            let local = argv.remove(0);
-            let width: u32 = argv.remove(0).parse().expect("width must be a number");
-            let height: u32 = argv.remove(0).parse().expect("height must be a number");
-            let fps: u32 = argv
-                .first()
-                .map(|s| s.parse().expect("fps must be a number"))
-                .unwrap_or(zerocast_transport::DEFAULT_FPS);
+            let profile_name = take_option_arg(&mut argv, "--profile");
+            let profile_kind = match profile_name.as_deref() {
+                None => None,
+                Some(name) => Some(
+                    zerocast_core::ProfileKind::parse(name).ok_or_else(|| {
+                        anyhow::anyhow!("--profile requires low|med|high|auto (got '{name}')")
+                    })?,
+                ),
+            };
+
+            let (local, width, height, fps) = if let Some(kind) = profile_kind {
+                let local = argv.first().cloned().ok_or_else(|| {
+                    anyhow::anyhow!(
+                        "recv with --profile requires <local>\n  \
+                         e.g. recv 0.0.0.0:5000 --profile auto\n  \
+                         e.g. recv 0.0.0.0:5000 --profile low"
+                    )
+                })?;
+                argv.remove(0);
+                let display = log_primary_display();
+                let (w, h, f) = profile_dims(kind, &display);
+                (local, w, h, f)
+            } else {
+                if argv.len() < 3 {
+                    anyhow::bail!(
+                        "recv requires <local> <width> <height> [fps]\n  \
+                         e.g. recv 0.0.0.0:5000 426 240 15\n  \
+                         e.g. recv 0.0.0.0:5000 --profile auto\n  \
+                         mDNS publish is on by default (use --no-mdns to disable)"
+                    );
+                }
+                let local = argv.remove(0);
+                let width: u32 = argv.remove(0).parse().context("width must be a number")?;
+                let height: u32 = argv.remove(0).parse().context("height must be a number")?;
+                let fps: u32 = argv
+                    .first()
+                    .map(|s| s.parse())
+                    .transpose()
+                    .context("fps must be a number")?
+                    .unwrap_or(zerocast_transport::DEFAULT_FPS);
+                (local, width, height, fps)
+            };
 
             let publisher = if !no_mdns {
                 let port = zerocast_discovery::listen_port(&local)?;
@@ -209,6 +238,7 @@ async fn main() -> anyhow::Result<()> {
                  zerocast_desktop stream <local> --discover [--profile low|med|high|auto]\n  \
                  zerocast_desktop stream <local> <target> --profile auto\n  \
                  zerocast_desktop recv <local> <width> <height> [fps] [--no-mdns]\n  \
+                 zerocast_desktop recv <local> --profile low|med|high|auto [--no-mdns]\n  \
                  zerocast_desktop recv-log <local>\n  \
                  zerocast_desktop --version\n\n\
                  Zero-config: start recv first (publishes via mDNS), then stream --discover.\n\n\
