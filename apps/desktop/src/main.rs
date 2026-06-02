@@ -4,6 +4,15 @@ use std::env;
 async fn main() -> anyhow::Result<()> {
     let mut args = env::args().skip(1);
     match args.next().as_deref() {
+        Some("-V" | "--version") => {
+            println!(
+                "{} {} (core {})",
+                env!("CARGO_PKG_NAME"),
+                env!("CARGO_PKG_VERSION"),
+                zerocast_core::version()
+            );
+            return Ok(());
+        }
         Some("send") => {
             let local = args.next().expect("missing local arg (e.g. 0.0.0.0:0)");
             let target = args.next().expect("missing target arg (e.g. 192.168.1.10:5000)");
@@ -74,7 +83,8 @@ async fn main() -> anyhow::Result<()> {
                  zerocast_desktop cap <local> <target>\n  \
                  zerocast_desktop stream <local> <target> [width] [height] [fps]\n  \
                  zerocast_desktop recv <local> [width] [height]\n  \
-                 zerocast_desktop recv-log <local>\n\n\
+                 zerocast_desktop recv-log <local>\n  \
+                 zerocast_desktop --version\n\n\
                  Requires `ffmpeg` on PATH for real H.264 (libx264). \
                  Install from https://ffmpeg.org/download.html"
             );
