@@ -10,14 +10,27 @@ fn take_flag(args: &mut Vec<String>, flag: &str) -> bool {
     }
 }
 
-fn take_option_arg(args: &mut Vec<String>, flag: &str) -> Option<String> {
-    let idx = args.iter().position(|a| a == flag)?;
+fn require_option_arg(
+    args: &mut Vec<String>,
+    flag: &str,
+    value_hint: &str,
+) -> anyhow::Result<Option<String>> {
+    let idx = match args.iter().position(|a| a == flag) {
+        Some(i) => i,
+        None => return Ok(None),
+    };
     args.remove(idx);
     if idx < args.len() && !args[idx].starts_with('-') {
-        Some(args.remove(idx))
+        Ok(Some(args.remove(idx)))
     } else {
-        None
+        anyhow::bail!("{flag} requires a value ({value_hint})")
     }
+}
+
+fn parse_profile_kind(name: &str) -> anyhow::Result<zerocast_core::ProfileKind> {
+    zerocast_core::ProfileKind::parse(name).ok_or_else(|| {
+        anyhow::anyhow!("--profile requires low|med|high|auto (got '{name}')")
+    })
 }
 
 fn log_primary_display() -> zerocast_platform::PrimaryDisplay {
@@ -82,14 +95,11 @@ async fn main() -> anyhow::Result<()> {
         Some("stream") => {
             let mut argv: Vec<String> = args.collect();
             let discover = take_flag(&mut argv, "--discover");
-            let profile_name = take_option_arg(&mut argv, "--profile");
+            let profile_name =
+                require_option_arg(&mut argv, "--profile", "low|med|high|auto")?;
             let profile_kind = match profile_name.as_deref() {
                 None => None,
-                Some(name) => Some(
-                    zerocast_core::ProfileKind::parse(name).ok_or_else(|| {
-                        anyhow::anyhow!("--profile requires low|med|high|auto (got '{name}')")
-                    })?,
-                ),
+                Some(name) => Some(parse_profile_kind(name)?),
             };
             let display = log_primary_display();
             let local = if argv.is_empty() {
@@ -139,15 +149,21 @@ async fn main() -> anyhow::Result<()> {
                 } else {
                     let width = argv
                         .first()
-                        .map(|s| s.parse().expect("width"))
+                        .map(|s| s.parse())
+                        .transpose()
+                        .context("width must be a number")?
                         .unwrap_or(zerocast_transport::DEFAULT_WIDTH);
                     let height = argv
                         .get(1)
-                        .map(|s| s.parse().expect("height"))
+                        .map(|s| s.parse())
+                        .transpose()
+                        .context("height must be a number")?
                         .unwrap_or(zerocast_transport::DEFAULT_HEIGHT);
                     let fps = argv
                         .get(2)
-                        .map(|s| s.parse().expect("fps"))
+                        .map(|s| s.parse())
+                        .transpose()
+                        .context("fps must be a number")?
                         .unwrap_or(zerocast_transport::DEFAULT_FPS);
                     (target, width, height, fps)
                 }
@@ -163,14 +179,11 @@ async fn main() -> anyhow::Result<()> {
         Some("recv") => {
             let mut argv: Vec<String> = args.collect();
             let no_mdns = take_flag(&mut argv, "--no-mdns");
-            let profile_name = take_option_arg(&mut argv, "--profile");
+            let profile_name =
+                require_option_arg(&mut argv, "--profile", "low|med|high|auto")?;
             let profile_kind = match profile_name.as_deref() {
                 None => None,
-                Some(name) => Some(
-                    zerocast_core::ProfileKind::parse(name).ok_or_else(|| {
-                        anyhow::anyhow!("--profile requires low|med|high|auto (got '{name}')")
-                    })?,
-                ),
+                Some(name) => Some(parse_profile_kind(name)?),
             };
 
             let (local, width, height, fps) = if let Some(kind) = profile_kind {

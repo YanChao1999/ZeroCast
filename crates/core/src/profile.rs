@@ -81,10 +81,11 @@ impl StreamProfile {
 
     /// Cap sender profile by receiver decode limits (QoS / discover).
     pub fn capped_for_receiver(self, recv: ReceiverCapability) -> Self {
+        let (width, height) = fit_within(self.width, self.height, recv.max_width, recv.max_height);
         Self {
             name: "negotiated",
-            width: self.width.min(recv.max_width),
-            height: self.height.min(recv.max_height),
+            width,
+            height,
             fps: self.fps.min(recv.max_fps),
         }
     }
@@ -160,6 +161,29 @@ mod tests {
         assert_eq!(out.width, 426);
         assert_eq!(out.height, 240);
         assert_eq!(out.fps, 15);
+    }
+
+    #[test]
+    fn capped_for_receiver_preserves_aspect_ratio() {
+        let sender = StreamProfile {
+            name: "test",
+            width: 1920,
+            height: 1080,
+            fps: 60,
+        };
+        let recv = ReceiverCapability {
+            max_width: 640,
+            max_height: 480,
+            max_fps: 30,
+        };
+        let out = sender.capped_for_receiver(recv);
+        assert!(out.width <= 640);
+        assert!(out.height <= 480);
+        assert_eq!(out.width % 2, 0);
+        assert_eq!(out.height % 2, 0);
+        // 16:9 scaled into 640x480 box → 640x360, not independent mins (640x480).
+        assert_eq!(out.width, 640);
+        assert_eq!(out.height, 360);
     }
 
     #[test]
