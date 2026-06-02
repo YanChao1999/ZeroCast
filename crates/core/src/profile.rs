@@ -78,6 +78,43 @@ impl StreamProfile {
             Self::LOW,
         ]
     }
+
+    /// Cap sender profile by receiver decode limits (QoS / discover).
+    pub fn capped_for_receiver(self, recv: ReceiverCapability) -> Self {
+        Self {
+            name: "negotiated",
+            width: self.width.min(recv.max_width),
+            height: self.height.min(recv.max_height),
+            fps: self.fps.min(recv.max_fps),
+        }
+    }
+}
+
+/// Receiver decode / display limits (from mDNS TXT or device defaults).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ReceiverCapability {
+    pub max_width: u32,
+    pub max_height: u32,
+    pub max_fps: u32,
+}
+
+impl ReceiverCapability {
+    /// Conservative defaults for Raspberry Pi Zero W class boards over Wi‑Fi.
+    pub fn embedded_pi_zero_w() -> Self {
+        Self {
+            max_width: 426,
+            max_height: 240,
+            max_fps: 15,
+        }
+    }
+
+    pub fn from_stream_profile(p: StreamProfile) -> Self {
+        Self {
+            max_width: p.width,
+            max_height: p.height,
+            max_fps: p.fps,
+        }
+    }
 }
 
 fn fit_within(src_w: u32, src_h: u32, max_w: u32, max_h: u32) -> (u32, u32) {
@@ -113,6 +150,16 @@ mod tests {
         let (w, h) = fit_within(3840, 2160, 1920, 1080);
         assert!(w <= 1920);
         assert!(h <= 1080);
+    }
+
+    #[test]
+    fn negotiate_with_embedded_recv() {
+        let sender = StreamProfile::auto_for_display(1920, 1080, 60);
+        let recv = ReceiverCapability::embedded_pi_zero_w();
+        let out = sender.capped_for_receiver(recv);
+        assert_eq!(out.width, 426);
+        assert_eq!(out.height, 240);
+        assert_eq!(out.fps, 15);
     }
 
     #[test]

@@ -4,12 +4,17 @@ Branch: TBD (`phase-qos/adaptive` after 1c media backends)
 
 ## Goal
 
-Start from the **primary monitor capability** (e.g. 1920×1080 @ 60 Hz), stream as high as the path allows, and **step down automatically** when encode or network/recvr metrics are bad. The current **426×240 @ 15 fps** ffmpeg path is the **lowest ladder rung**, not the product default.
+Start from the **primary monitor capability** (e.g. 1920×1080 @ 60 Hz) on the **sender**, but never exceed what the **receiver** and **network** can sustain. Stream as high as the path allows, and **step down automatically** when encode, decode, or Wi‑Fi metrics are bad.
+
+The current **426×240 @ 15 fps** path is the **lowest ladder rung** — and the **default ceiling** for weak edge receivers (e.g. Raspberry Pi Zero W).
 
 ## Architecture
 
 ```text
-Display detect (WxH, Hz)
+Sender: display detect (WxH, Hz)     → sender ceiling
+Receiver: device class + decode cap → recv ceiling (mDNS TXT)
+Network: Wi‑Fi / loss / jitter       → effective ceiling
+    → negotiated profile = min(sender, recv, network)
     → Profile ladder (1080p60 … 426p15)
     → Encoder registry (HW → ffmpeg pipe → one-shot SW)
     → RTP + RTCP metrics
@@ -40,9 +45,39 @@ Cross-platform encoders (future `crates/media` or `transport` backends):
 |------|------------|-----|-----|
 | High | min(display, 1920×1080) | min(display Hz, 60) | Good LAN + HW encode |
 | Med | 1280×720 | 30 | Moderate load |
-| Low | 426×240 | 15 | MVP / emergency fallback |
+| Low | 426×240 | 15 | MVP, **Pi Zero W default**, bad Wi‑Fi |
 
-QoS steps **down** one rung on sustained bad metrics; steps **up** slowly when stable.
+QoS steps **down** one rung on sustained bad metrics; steps **up** slowly when stable. The **effective ceiling** is `min(sender auto profile, recv advertised max, network budget)`.
+
+## Embedded receivers (Linux ARM / Wi‑Fi)
+
+Target example: **Raspberry Pi Zero W** (ARM1176, 512 MB RAM, 2.4 GHz Wi‑Fi only) running `recv` headless or with a small display.
+
+| Constraint | Implication |
+|------------|-------------|
+| **CPU** | Software H.264 decode at 1080p60 is not realistic; cap recv at **426×240–720p** |
+| **RAM** | Limit framebuffer + decode buffers; prefer **recv-log** / headless on Pi |
+| **Wi‑Fi** | 2.4 GHz, higher loss/jitter → QoS must downgrade aggressively; optional pacing |
+| **No GPU encode/decode** | Sender uses desktop HW; recv uses **ffmpeg/libav SW decode** or future V4L2 M2M on Pi 4+ |
+| **Cross-build** | `aarch64`/`armv6` Linux binary; avoid heavy deps on Zero W |
+
+**Design rules**
+
+1. **`recv` publishes recv capability**, not just listen port — extend mDNS TXT:
+   - `max_w`, `max_h`, `max_fps` (hard decode ceiling)
+   - `dev=pi0w` or `class=embedded` (optional hint for sender defaults)
+2. **`stream --discover`** picks `min(sender profile, recv TXT)` — not sender 1080p60 into a Pi Zero.
+3. **Default Pi Zero W profile**: `426×240 @ 15` (today’s MVP); QoS may drop fps before resolution on Wi‑Fi.
+4. **Headless recv** on embedded: `recv-log` or framebuffer KMS later; minifb optional.
+5. **Sender on desktop** remains high-capability; adaptation is asymmetric by design.
+
+```text
+Desktop sender (1080p60 capable)
+        │  RTP over Wi‑Fi
+        ▼
+Pi Zero W recv (426×240 @ 15 capable)
+        → decode + HDMI / SPI display
+```
 
 ## TODO checklist
 
@@ -54,11 +89,21 @@ QoS steps **down** one rung on sustained bad metrics; steps **up** slowly when s
 - [x] Saner one-shot GOP (`-g fps`, SPS/PPS on IDR only)
 - [ ] ffmpeg hwaccel probe (NVENC / QSV / VideoToolbox)
 - [ ] Publish/display max capability in mDNS TXT (`max_w`, `max_h`, `max_fps`)
+- [ ] `ReceiverCapability` in core; discover uses `min(sender, recv)`
+
+### Embedded recv (Linux ARM)
+
+- [ ] Document Pi Zero W build (`armv6-unknown-linux-gnueabihf` / `aarch64`)
+- [ ] Headless `recv` service mode (no minifb) for edge deploy
+- [ ] mDNS TXT `class=embedded` + conservative defaults
+- [ ] Recv-side decode lag metric → RTCP or feedback channel for QoS
+- [ ] Optional: Pi 4+ V4L2 `h264_v4l2m2m` decode backend
+- [ ] Wi‑Fi aware defaults (start low on `wlan0`, slow ramp-up)
 
 ### Phase QoS v1 — closed loop
 
 - [ ] `QosController` module (metrics window, hysteresis)
-- [ ] Downgrade on: encode_ms > budget, loss > threshold, recv lag
+- [ ] Downgrade on: encode_ms > budget, loss > threshold, recv lag, **recv decode overload**
 - [ ] Upgrade after stable window
 - [ ] Reconfigure encoder + capture scale without restart
 - [ ] Dynamic mDNS re-advertise or control channel for profile change
@@ -88,7 +133,17 @@ cargo run -p zerocast_desktop -- stream 0.0.0.0:0 192.168.1.10:5000 --profile au
 cargo run -p zerocast_desktop -- stream 0.0.0.0:0 --discover --profile med
 ```
 
-Discover still uses recv TXT dimensions unless `--profile` overrides (override TODO).
+Discover uses recv TXT dimensions unless `--profile` overrides on the sender.
+
+**Embedded recv (future):** Pi Zero W should advertise e.g. `426×240 @ 15`; desktop sender must not exceed that when using `--discover` without override.
+
+```bash
+# Edge receiver (Linux ARM, same LAN)
+zerocast_desktop recv 0.0.0.0:5000 426 240 15
+
+# Desktop sender — profile capped by recv + QoS
+zerocast_desktop stream 0.0.0.0:0 --discover --profile auto
+```
 
 ## Related
 

@@ -9,7 +9,7 @@ Goals
 - Native performance, low latency, small binaries
 - LAN-only: no cloud, no accounts
 - Cross-platform: Windows, macOS, Linux, Android, iOS
-- Could deploy on some edge device
+- Edge receivers: Linux ARM boards (e.g. Raspberry Pi Zero W over Wi‑Fi)
 
 Quick start
 
@@ -85,3 +85,4 @@ Roadmap (short)
 6. **Phase QoS** — adaptive ladder, HW encoders, fallback — [docs/PHASE-QOS.md](docs/PHASE-QOS.md)
 7. Android receiver, then sender
 8. iOS support (ReplayKit + VideoToolbox)
+9. **Embedded recv** — Linux ARM (Pi Zero W, Wi‑Fi) — [docs/PHASE-QOS.md](docs/PHASE-QOS.md#embedded-receivers-linux-arm--wifi)

@@ -1,6 +1,6 @@
 mod profile;
 
-pub use profile::{ProfileKind, StreamProfile};
+pub use profile::{ProfileKind, ReceiverCapability, StreamProfile};
 
 /// Workspace version string (`CARGO_PKG_VERSION` from the building crate).
 pub fn version() -> &'static str {
