@@ -49,6 +49,53 @@ fn log_primary_display() -> zerocast_platform::PrimaryDisplay {
     }
 }
 
+fn negotiate_stream_dims(
+    ad: &zerocast_discovery::StreamAdvertisement,
+    profile_kind: Option<zerocast_core::ProfileKind>,
+    display: &zerocast_platform::PrimaryDisplay,
+    default_fps: u32,
+) -> (u32, u32, u32) {
+    use zerocast_core::{ReceiverCapability, StreamProfile};
+
+    let recv = ReceiverCapability {
+        max_width: ad.effective_max_width(),
+        max_height: ad.effective_max_height(),
+        max_fps: ad.effective_max_fps(ad.session_fps_or(default_fps)),
+    };
+    let sender = match profile_kind {
+        Some(kind) => StreamProfile::from_kind(
+            kind,
+            display.width,
+            display.height,
+            display.refresh_hz,
+        ),
+        None => StreamProfile {
+            name: "recv-session",
+            width: ad.width,
+            height: ad.height,
+            fps: ad.effective_fps(default_fps),
+        },
+    };
+    let negotiated = sender.capped_for_receiver(recv);
+    let session_fps = ad.effective_fps(default_fps);
+    if profile_kind.is_some()
+        || negotiated.width != ad.width
+        || negotiated.height != ad.height
+        || negotiated.fps != session_fps
+    {
+        eprintln!(
+            "discover: negotiated {}x{} @ {} fps (recv cap {}x{} @ {} fps)",
+            negotiated.width,
+            negotiated.height,
+            negotiated.fps,
+            recv.max_width,
+            recv.max_height,
+            recv.max_fps
+        );
+    }
+    (negotiated.width, negotiated.height, negotiated.fps)
+}
+
 fn profile_dims(
     kind: zerocast_core::ProfileKind,
     display: &zerocast_platform::PrimaryDisplay,
@@ -116,15 +163,12 @@ async fn main() -> anyhow::Result<()> {
                 let ad = zerocast_discovery::pick_receiver(found)?;
                 ad.validate_dimensions()?;
                 let target = ad.target_addr();
-                let (width, height, fps) = if let Some(kind) = profile_kind {
-                    profile_dims(kind, &display)
-                } else {
-                    (
-                        ad.width,
-                        ad.height,
-                        ad.effective_fps(zerocast_transport::DEFAULT_FPS),
-                    )
-                };
+                let (width, height, fps) = negotiate_stream_dims(
+                    &ad,
+                    profile_kind,
+                    &display,
+                    zerocast_transport::DEFAULT_FPS,
+                );
                 eprintln!(
                     "mdns: streaming to {} ({}x{} @ {} fps)",
                     target, width, height, fps

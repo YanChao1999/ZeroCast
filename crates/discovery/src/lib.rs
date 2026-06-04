@@ -1,7 +1,7 @@
 //! mDNS-SD discovery for ZeroCast streams (Phase 2a).
 //!
 //! Service type: `_zerocast._udp.local.`
-//! TXT keys: `w`, `h`, `fps`, `v` (protocol version)
+//! TXT keys: `w`, `h`, `fps`, `max_w`, `max_h`, `max_fps`, `v` (protocol version)
 
 mod browse;
 mod daemon;
@@ -24,15 +24,34 @@ pub const SERVICE_TYPE: &str = "_zerocast._udp.local.";
 /// TXT property: protocol / API version.
 pub const TXT_VERSION: &str = "v";
 
+/// Fallback when session `fps` is unset (matches transport default).
+pub const DEFAULT_STREAM_FPS: u32 = 15;
+
+/// Parsed mDNS TXT stream properties.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct TxtStreamProps {
+    pub width: u32,
+    pub height: u32,
+    pub fps: u32,
+    pub max_width: u32,
+    pub max_height: u32,
+    pub max_fps: u32,
+}
+
 /// Advertised stream metadata (from TXT + SRV).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StreamAdvertisement {
     pub instance_name: String,
     pub host: String,
     pub port: u16,
+    /// Preferred session width (recv window / decode size).
     pub width: u32,
     pub height: u32,
     pub fps: u32,
+    /// Decode ceiling; `0` means same as `width` / `height` / `fps`.
+    pub max_width: u32,
+    pub max_height: u32,
+    pub max_fps: u32,
 }
 
 impl StreamAdvertisement {
@@ -60,22 +79,78 @@ impl StreamAdvertisement {
             self.fps
         }
     }
+
+    pub fn effective_max_width(&self) -> u32 {
+        if self.max_width > 0 {
+            self.max_width
+        } else {
+            self.width
+        }
+    }
+
+    pub fn effective_max_height(&self) -> u32 {
+        if self.max_height > 0 {
+            self.max_height
+        } else {
+            self.height
+        }
+    }
+
+    pub fn effective_max_fps(&self, session_fps: u32) -> u32 {
+        if self.max_fps > 0 {
+            self.max_fps
+        } else {
+            session_fps
+        }
+    }
+
+    /// Session fps used for cap fallback (`fps` when advertised, else `session_fps`).
+    pub fn session_fps_or(&self, fallback_fps: u32) -> u32 {
+        self.effective_fps(fallback_fps)
+    }
+
+    /// True when explicit TXT `max_*` values differ from session `w`/`h`/`fps`.
+    pub fn explicit_caps_differ_from_session(&self) -> bool {
+        (self.max_width > 0 && self.max_width != self.width)
+            || (self.max_height > 0 && self.max_height != self.height)
+            || (self.max_fps > 0 && self.max_fps != self.fps)
+    }
 }
 
-/// Parse TXT properties from mdns-sd into stream dimensions.
-pub fn parse_txt_properties(properties: &[(String, String)]) -> (u32, u32, u32) {
-    let mut width = 0u32;
-    let mut height = 0u32;
-    let mut fps = 0u32;
+/// Parse TXT properties from mdns-sd into stream dimensions and recv caps.
+pub fn parse_txt_properties(properties: &[(String, String)]) -> TxtStreamProps {
+    let mut props = TxtStreamProps::default();
     for (k, v) in properties {
         match k.as_str() {
-            "w" => width = v.parse().unwrap_or(0),
-            "h" => height = v.parse().unwrap_or(0),
-            "fps" => fps = v.parse().unwrap_or(0),
+            "w" => props.width = v.parse().unwrap_or(0),
+            "h" => props.height = v.parse().unwrap_or(0),
+            "fps" => props.fps = v.parse().unwrap_or(0),
+            "max_w" => props.max_width = v.parse().unwrap_or(0),
+            "max_h" => props.max_height = v.parse().unwrap_or(0),
+            "max_fps" => props.max_fps = v.parse().unwrap_or(0),
             _ => {}
         }
     }
-    (width, height, fps)
+    props
+}
+
+pub fn advertisement_from_txt(
+    instance_name: String,
+    host: String,
+    port: u16,
+    txt: TxtStreamProps,
+) -> StreamAdvertisement {
+    StreamAdvertisement {
+        instance_name,
+        host,
+        port,
+        width: txt.width,
+        height: txt.height,
+        fps: txt.fps,
+        max_width: txt.max_width,
+        max_height: txt.max_height,
+        max_fps: txt.max_fps,
+    }
 }
 
 #[cfg(test)]
@@ -92,6 +167,9 @@ mod tests {
             width: 426,
             height: 240,
             fps: 15,
+            max_width: 426,
+            max_height: 240,
+            max_fps: 15,
         };
         local_registry::write_receiver(&ad).expect("write");
         let found = local_registry::read_local_receivers();
@@ -107,7 +185,44 @@ mod tests {
             ("fps".into(), "15".into()),
             ("v".into(), "1".into()),
         ];
-        assert_eq!(parse_txt_properties(&props), (426, 240, 15));
+        let txt = parse_txt_properties(&props);
+        assert_eq!(txt.width, 426);
+        assert_eq!(txt.height, 240);
+        assert_eq!(txt.fps, 15);
+        assert_eq!(txt.max_width, 0);
+    }
+
+    #[test]
+    fn parse_txt_max_caps() {
+        let props = vec![
+            ("w".into(), "1920".into()),
+            ("h".into(), "1080".into()),
+            ("fps".into(), "60".into()),
+            ("max_w".into(), "426".into()),
+            ("max_h".into(), "240".into()),
+            ("max_fps".into(), "15".into()),
+        ];
+        let txt = parse_txt_properties(&props);
+        assert_eq!(txt.max_width, 426);
+        assert_eq!(txt.max_height, 240);
+        assert_eq!(txt.max_fps, 15);
+    }
+
+    #[test]
+    fn effective_max_falls_back_to_session() {
+        let ad = StreamAdvertisement {
+            instance_name: "r".into(),
+            host: "127.0.0.1".into(),
+            port: 5000,
+            width: 426,
+            height: 240,
+            fps: 15,
+            max_width: 0,
+            max_height: 0,
+            max_fps: 0,
+        };
+        assert_eq!(ad.effective_max_width(), 426);
+        assert_eq!(ad.effective_max_fps(ad.session_fps_or(30)), 15);
     }
 
     /// Registers a receiver and browses on the same host (needs UDP 5353 / multicast).
