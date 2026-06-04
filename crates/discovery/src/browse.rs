@@ -156,14 +156,20 @@ pub fn pick_receiver(streams: Vec<DiscoveredStream>) -> Result<StreamAdvertiseme
         } else {
             String::new()
         };
+        let class_note = a
+            .device_class
+            .as_deref()
+            .map(|c| format!(", class={c}"))
+            .unwrap_or_default();
         eprintln!(
-            "  [{i}] {} -> {} ({}x{} @ {} fps{})",
+            "  [{i}] {} -> {} ({}x{} @ {} fps{}{})",
             a.instance_name,
             a.target_addr(),
             a.width,
             a.height,
             a.fps,
-            cap_note
+            cap_note,
+            class_note
         );
     }
     let index = if streams.len() == 1 {

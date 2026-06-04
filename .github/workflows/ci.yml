@@ -1,0 +1,100 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+
+env:
+  CARGO_TERM_COLOR: always
+  CI: true
+
+jobs:
+  test-linux:
+    name: test (linux)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Install ffmpeg
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg
+      - name: Verify ffmpeg
+        run: ffmpeg -version | head -n 1
+      - name: Unit tests (workspace)
+        run: cargo test --workspace
+      - name: FFmpeg integration (426p + 720p roundtrip)
+        run: cargo test -p zerocast_transport --test ffmpeg_integration
+      - name: QoS controller tests
+        run: cargo test -p zerocast_core qos::
+
+  test-windows:
+    name: test (windows)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: FedericoCarboni/setup-ffmpeg@v3
+        id: ffmpeg
+      - name: Verify ffmpeg
+        run: ffmpeg -version
+        shell: bash
+      - name: Unit tests (workspace)
+        run: cargo test --workspace
+      - name: FFmpeg integration
+        run: cargo test -p zerocast_transport --test ffmpeg_integration
+      - name: QoS controller tests
+        run: cargo test -p zerocast_core qos::
+
+  test-macos:
+    name: test (macos)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: FedericoCarboni/setup-ffmpeg@v3
+      - name: Verify ffmpeg
+        run: ffmpeg -version | head -n 1
+      - name: Unit tests (workspace)
+        run: cargo test --workspace
+      - name: FFmpeg integration
+        run: cargo test -p zerocast_transport --test ffmpeg_integration
+      - name: QoS controller tests
+        run: cargo test -p zerocast_core qos::
+
+  # Mobile apps are not in-tree yet; keep core + platform (stub capture) compiling on device targets.
+  check-ios:
+    name: check (ios)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Add iOS simulator target
+        run: rustup target add aarch64-apple-ios-sim
+      - name: cargo check (core, platform)
+        run: cargo check -p zerocast_core -p zerocast_platform --target aarch64-apple-ios-sim
+
+  check-android:
+    name: check (android)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: nttld/setup-ndk@v1
+        id: setup-ndk
+        with:
+          ndk-version: r26d
+      - name: Add Android target
+        run: rustup target add aarch64-linux-android
+      - name: Configure Android linker
+        run: |
+          mkdir -p .cargo
+          cat >> .cargo/config.toml <<EOF
+          [target.aarch64-linux-android]
+          linker = "${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android34-clang"
+          EOF
+      - name: cargo check (core, platform)
+        run: cargo check -p zerocast_core -p zerocast_platform --target aarch64-linux-android

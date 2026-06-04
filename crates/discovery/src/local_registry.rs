@@ -3,6 +3,7 @@ use crate::{StreamAdvertisement, DEFAULT_STREAM_FPS};
 use anyhow::{Context, Result};
 use std::fs;
 use std::io::Write;
+use std::net::{IpAddr, SocketAddr};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -55,6 +56,9 @@ pub fn write_receiver(ad: &StreamAdvertisement) -> Result<()> {
     writeln!(f, "max_h={}", ad.effective_max_height())?;
     let session_fps = ad.session_fps_or(DEFAULT_STREAM_FPS);
     writeln!(f, "max_fps={}", ad.effective_max_fps(session_fps))?;
+    if let Some(class) = &ad.device_class {
+        writeln!(f, "class={class}")?;
+    }
     Ok(())
 }
 
@@ -106,6 +110,7 @@ fn parse_entry(path: &Path, text: &str) -> Option<StreamAdvertisement> {
     let mut max_width = 0u32;
     let mut max_height = 0u32;
     let mut max_fps = 0u32;
+    let mut device_class = None;
 
     for line in text.lines() {
         let Some((k, v)) = line.split_once('=') else {
@@ -121,6 +126,7 @@ fn parse_entry(path: &Path, text: &str) -> Option<StreamAdvertisement> {
             "max_w" => max_width = v.trim().parse().unwrap_or(0),
             "max_h" => max_height = v.trim().parse().unwrap_or(0),
             "max_fps" => max_fps = v.trim().parse().unwrap_or(0),
+            "class" => device_class = Some(v.trim().to_string()),
             _ => {}
         }
     }
@@ -137,6 +143,7 @@ fn parse_entry(path: &Path, text: &str) -> Option<StreamAdvertisement> {
         max_width,
         max_height,
         max_fps,
+        device_class,
     })
 }
 
@@ -151,6 +158,25 @@ fn entry_is_fresh(path: &Path) -> bool {
         .elapsed()
         .map(|age| age < MAX_AGE)
         .unwrap_or(true)
+}
+
+fn target_matches_receiver(target: &SocketAddr, ad: &StreamAdvertisement) -> bool {
+    if target.port() != ad.port {
+        return false;
+    }
+    match target.ip() {
+        IpAddr::V4(v4) if v4.is_loopback() || v4.is_unspecified() => true,
+        IpAddr::V6(v6) if v6.is_loopback() || v6.is_unspecified() => true,
+        ip => ad.host == ip.to_string(),
+    }
+}
+
+/// Same-PC receiver for a direct `stream … 127.0.0.1:PORT` target (registry written by `recv`).
+pub fn receiver_for_target(target: &str) -> Option<StreamAdvertisement> {
+    let addr: SocketAddr = target.parse().ok()?;
+    read_local_receivers()
+        .into_iter()
+        .find(|ad| target_matches_receiver(&addr, ad))
 }
 
 /// Receivers published by a `recv` process on this machine (updated every few seconds while running).

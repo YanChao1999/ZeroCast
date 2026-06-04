@@ -52,6 +52,12 @@ impl ScrapCapturer {
         self.native_height
     }
 
+    /// Change output scale without reopening DXGI (avoids capture failures on QoS step).
+    pub fn set_output_size(&mut self, out_width: u32, out_height: u32) {
+        self.out_width = out_width;
+        self.out_height = out_height;
+    }
+
     pub fn capture_frame(&mut self) -> Result<Vec<u8>> {
         const SPIN: Duration = Duration::from_millis(1);
         /// Wait briefly for DXGI to deliver a new desktop frame.

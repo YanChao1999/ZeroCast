@@ -13,7 +13,21 @@ mod receiver_view;
 
 pub use decoder::decode_access_unit_rgb24;
 pub use display::RgbFrame;
-pub use encoder::{FfmpegCliEncoder, VideoEncoder, DEFAULT_FPS, DEFAULT_HEIGHT, DEFAULT_WIDTH};
+pub use encoder::{
+    encode_access_unit_oneshot, FfmpegCliEncoder, VideoEncoder, DEFAULT_FPS, DEFAULT_HEIGHT,
+    DEFAULT_WIDTH,
+};
+pub use h264_rtp::nalus_to_annex_b;
+
+/// Optional QoS context for `capture_encode_and_stream` (sender-side metrics).
+#[derive(Debug, Clone, Copy)]
+pub struct StreamQosOpts {
+    pub display_w: u32,
+    pub display_h: u32,
+    pub refresh_hz: u32,
+    pub recv_cap: Option<zerocast_core::ReceiverCapability>,
+    pub device_class: zerocast_core::DeviceClass,
+}
 
 /// Receive RTP, decode H.264, and show a minifb window (blocking UI thread).
 pub async fn recv_with_display(local: &str, width: u32, height: u32) -> anyhow::Result<()> {
@@ -374,6 +388,18 @@ pub async fn capture_encode_and_stream(
     fps: u32,
     max_frames: u64,
 ) -> anyhow::Result<()> {
+    capture_encode_and_stream_with_qos(local, target, width, height, fps, max_frames, None).await
+}
+
+pub async fn capture_encode_and_stream_with_qos(
+    local: &str,
+    target: &str,
+    width: u32,
+    height: u32,
+    fps: u32,
+    max_frames: u64,
+    qos: Option<StreamQosOpts>,
+) -> anyhow::Result<()> {
     // Screen + network setup before ffmpeg: a long gap after the first stdin writes
     // makes ffmpeg's pipe encoder stop producing output on Windows.
     let mut screen = zerocast_platform::ScreenCapture::open(width, height)?;
@@ -392,6 +418,7 @@ pub async fn capture_encode_and_stream(
         Some(screen),
         Some(sender),
         Some(first_frame),
+        qos,
     )
     .await
 }
@@ -406,32 +433,94 @@ pub async fn capture_encode_and_stream_with_encoder(
     video_encoder: FfmpegCliEncoder,
 ) -> anyhow::Result<()> {
     stream_loop(
-        local, target, width, height, fps, max_frames, video_encoder, None, None, None,
+        local,
+        target,
+        width,
+        height,
+        fps,
+        max_frames,
+        video_encoder,
+        None,
+        None,
+        None,
+        None,
     )
     .await
 }
 
+fn apply_qos_stream_profile(
+    profile: zerocast_core::StreamProfile,
+    width: &mut u32,
+    height: &mut u32,
+    fps: &mut u32,
+    frame_duration: &mut std::time::Duration,
+    screen: &mut zerocast_platform::ScreenCapture,
+    video_encoder: &mut FfmpegCliEncoder,
+) -> anyhow::Result<()> {
+    if profile.width == *width && profile.height == *height && profile.fps == *fps {
+        return Ok(());
+    }
+    eprintln!(
+        "qos: reconfiguring stream to {} ({}x{} @ {} fps)",
+        profile.name, profile.width, profile.height, profile.fps
+    );
+    *width = profile.width;
+    *height = profile.height;
+    *fps = profile.fps;
+    *frame_duration = std::time::Duration::from_secs_f64(1.0 / (*fps).max(1) as f64);
+    if let Err(e) = screen.reconfigure(*width, *height) {
+        eprintln!("screen capture: reconfigure failed ({e:#}), reopening");
+        *screen = zerocast_platform::ScreenCapture::open(*width, *height)?;
+    }
+    let frame = screen.capture_frame()?;
+    *video_encoder = FfmpegCliEncoder::open_with_warmup(*width, *height, *fps, Some(&frame))?;
+    Ok(())
+}
+
 async fn stream_loop(
-    local: &str,
-    target: &str,
-    width: u32,
-    height: u32,
-    fps: u32,
+    _local: &str,
+    _target: &str,
+    mut width: u32,
+    mut height: u32,
+    mut fps: u32,
     max_frames: u64,
     mut video_encoder: FfmpegCliEncoder,
     screen: Option<zerocast_platform::ScreenCapture>,
     sender: Option<Sender>,
     first_frame: Option<Vec<u8>>,
+    qos: Option<StreamQosOpts>,
 ) -> anyhow::Result<()> {
+    use zerocast_core::{QosAction, QosController, StreamMetricsSample, StreamProfile};
+
+    let mut qos_controller = qos.map(|o| {
+        let session = StreamProfile {
+            name: "session",
+            width,
+            height,
+            fps,
+        };
+        QosController::new(
+            session,
+            o.display_w,
+            o.display_h,
+            o.refresh_hz,
+            o.recv_cap,
+            o.device_class,
+        )
+    });
+    if qos_controller.is_some() {
+        eprintln!("qos: monitoring sender metrics (hot reconfigure enabled)");
+    }
+
     let mut screen = match screen {
         Some(s) => s,
         None => zerocast_platform::ScreenCapture::open(width, height)?,
     };
     let mut sender = match sender {
         Some(s) => s,
-        None => Sender::bind(local, target).await?,
+        None => Sender::bind(_local, _target).await?,
     };
-    let frame_duration = std::time::Duration::from_secs_f64(1.0 / fps.max(1) as f64);
+    let mut frame_duration = std::time::Duration::from_secs_f64(1.0 / fps.max(1) as f64);
     let rtcp_interval = std::time::Duration::from_secs(1);
     let mut next_rtcp = std::time::Instant::now();
     let mut frame_index = 0u64;
@@ -511,6 +600,30 @@ async fn stream_loop(
                 kbps,
                 stats_frames
             );
+            if let Some(controller) = qos_controller.as_mut() {
+                let sample = StreamMetricsSample {
+                    actual_fps: fps_actual,
+                    target_fps: fps as f64,
+                    avg_encode_ms: avg_encode,
+                    kbps,
+                };
+                let action = controller.observe_window(sample);
+                match action {
+                    QosAction::Hold => {}
+                    QosAction::RecommendDowngrade(p) | QosAction::RecommendUpgrade(p) => {
+                        apply_qos_stream_profile(
+                            p,
+                            &mut width,
+                            &mut height,
+                            &mut fps,
+                            &mut frame_duration,
+                            &mut screen,
+                            &mut video_encoder,
+                        )?;
+                        controller.on_profile_applied(p);
+                    }
+                }
+            }
             stats_window_start = std::time::Instant::now();
             stats_frames = 0;
             stats_encode_ms = 0.0;

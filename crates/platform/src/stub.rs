@@ -15,6 +15,11 @@ impl StubCapturer {
         }
     }
 
+    pub fn set_output_size(&mut self, width: u32, height: u32) {
+        self.width = width;
+        self.height = height;
+    }
+
     pub fn capture_frame(&mut self) -> Result<Vec<u8>> {
         let idx = self.frame_index;
         self.frame_index = self.frame_index.wrapping_add(1);

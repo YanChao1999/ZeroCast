@@ -1670,6 +1670,7 @@ dependencies = [
  "serial_test",
  "tokio",
  "webrtc-util",
+ "zerocast_core",
  "zerocast_platform",
 ]
 

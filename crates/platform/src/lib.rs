@@ -69,6 +69,22 @@ impl ScreenCapture {
         self.height
     }
 
+    /// Resize captured output without reopening the OS capturer (QoS hot reconfigure).
+    pub fn reconfigure(&mut self, width: u32, height: u32) -> Result<()> {
+        assert!(width > 0 && height > 0, "width and height must be positive");
+        match &mut self.inner {
+            #[cfg(any(windows, target_os = "macos", target_os = "linux"))]
+            CaptureInner::Scrap(s) => {
+                s.set_output_size(width, height);
+            }
+            CaptureInner::Stub(s) => s.set_output_size(width, height),
+        }
+        self.width = width;
+        self.height = height;
+        eprintln!("screen capture: output resized to {}x{}", width, height);
+        Ok(())
+    }
+
     /// One RGB24 frame (`width * height * 3` bytes).
     pub fn capture_frame(&mut self) -> Result<Vec<u8>> {
         match &mut self.inner {

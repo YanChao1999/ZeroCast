@@ -1,7 +1,7 @@
 //! mDNS-SD discovery for ZeroCast streams (Phase 2a).
 //!
 //! Service type: `_zerocast._udp.local.`
-//! TXT keys: `w`, `h`, `fps`, `max_w`, `max_h`, `max_fps`, `v` (protocol version)
+//! TXT keys: `w`, `h`, `fps`, `max_w`, `max_h`, `max_fps`, `class`, `v` (protocol version)
 
 mod browse;
 mod daemon;
@@ -10,6 +10,7 @@ mod net;
 mod publish;
 
 pub use browse::{browse_streams, pick_receiver, DiscoveredStream};
+pub use local_registry::receiver_for_target;
 pub use publish::{local_instance_name, listen_port, StreamPublisher};
 
 use anyhow::{bail, Result};
@@ -28,7 +29,7 @@ pub const TXT_VERSION: &str = "v";
 pub const DEFAULT_STREAM_FPS: u32 = 15;
 
 /// Parsed mDNS TXT stream properties.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct TxtStreamProps {
     pub width: u32,
     pub height: u32,
@@ -36,6 +37,8 @@ pub struct TxtStreamProps {
     pub max_width: u32,
     pub max_height: u32,
     pub max_fps: u32,
+    /// Optional QoS hint, e.g. `embedded` for Pi-class receivers.
+    pub device_class: Option<String>,
 }
 
 /// Advertised stream metadata (from TXT + SRV).
@@ -52,6 +55,7 @@ pub struct StreamAdvertisement {
     pub max_width: u32,
     pub max_height: u32,
     pub max_fps: u32,
+    pub device_class: Option<String>,
 }
 
 impl StreamAdvertisement {
@@ -128,6 +132,7 @@ pub fn parse_txt_properties(properties: &[(String, String)]) -> TxtStreamProps {
             "max_w" => props.max_width = v.parse().unwrap_or(0),
             "max_h" => props.max_height = v.parse().unwrap_or(0),
             "max_fps" => props.max_fps = v.parse().unwrap_or(0),
+            "class" => props.device_class = Some(v.clone()),
             _ => {}
         }
     }
@@ -150,6 +155,7 @@ pub fn advertisement_from_txt(
         max_width: txt.max_width,
         max_height: txt.max_height,
         max_fps: txt.max_fps,
+        device_class: txt.device_class,
     }
 }
 
@@ -170,6 +176,7 @@ mod tests {
             max_width: 426,
             max_height: 240,
             max_fps: 15,
+            device_class: None,
         };
         local_registry::write_receiver(&ad).expect("write");
         let found = local_registry::read_local_receivers();
@@ -193,6 +200,13 @@ mod tests {
     }
 
     #[test]
+    fn parse_txt_device_class() {
+        let props = vec![("class".into(), "embedded".into())];
+        let txt = parse_txt_properties(&props);
+        assert_eq!(txt.device_class.as_deref(), Some("embedded"));
+    }
+
+    #[test]
     fn parse_txt_max_caps() {
         let props = vec![
             ("w".into(), "1920".into()),
@@ -209,6 +223,26 @@ mod tests {
     }
 
     #[test]
+    fn receiver_for_target_matches_loopback_port() {
+        let ad = StreamAdvertisement {
+            instance_name: "loop-recv".into(),
+            host: "192.168.1.50".into(),
+            port: 5010,
+            width: 426,
+            height: 240,
+            fps: 15,
+            max_width: 426,
+            max_height: 240,
+            max_fps: 15,
+            device_class: Some("embedded".into()),
+        };
+        local_registry::write_receiver(&ad).expect("write");
+        let found = local_registry::receiver_for_target("127.0.0.1:5010");
+        assert_eq!(found.as_ref().map(|a| a.port), Some(5010));
+        local_registry::remove_receiver("loop-recv");
+    }
+
+    #[test]
     fn effective_max_falls_back_to_session() {
         let ad = StreamAdvertisement {
             instance_name: "r".into(),
@@ -220,6 +254,7 @@ mod tests {
             max_width: 0,
             max_height: 0,
             max_fps: 0,
+            device_class: None,
         };
         assert_eq!(ad.effective_max_width(), 426);
         assert_eq!(ad.effective_max_fps(ad.session_fps_or(30)), 15);

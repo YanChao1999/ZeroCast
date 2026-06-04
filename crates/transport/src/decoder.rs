@@ -15,7 +15,9 @@ pub fn decode_access_unit_rgb24(
         bail!("empty access unit");
     }
 
-    let scale = format!("scale={hint_width}:{hint_height}:flags=fast_bilinear");
+    let scale = format!(
+        "scale={hint_width}:{hint_height}:force_original_aspect_ratio=disable:flags=fast_bilinear"
+    );
     let mut child = Command::new("ffmpeg");
     child
         .args([
@@ -24,9 +26,9 @@ pub fn decode_access_unit_rgb24(
             "-loglevel",
             "error",
             "-probesize",
-            "8192",
+            "65536",
             "-analyzeduration",
-            "100000",
+            "500000",
             "-flags",
             "low_delay",
             "-f",
@@ -75,5 +77,70 @@ pub fn decode_access_unit_rgb24(
             stderr.trim()
         );
     }
-    Ok((rgb[..expected].to_vec(), hint_width, hint_height))
+    if rgb.len() == expected {
+        return Ok((rgb, hint_width, hint_height));
+    }
+    // Wrong stride if we truncated a full-resolution buffer — scale down instead.
+    let Some((src_w, src_h)) = infer_rgb24_dimensions(rgb.len()) else {
+        bail!(
+            "ffmpeg decode size mismatch: got {} bytes, expected {} ({}x{})",
+            rgb.len(),
+            expected,
+            hint_width,
+            hint_height
+        );
+    };
+    let scaled = scale_rgb24_nearest(&rgb, src_w, src_h, hint_width, hint_height);
+    Ok((scaled, hint_width, hint_height))
+}
+
+fn infer_rgb24_dimensions(len: usize) -> Option<(u32, u32)> {
+    if len % 3 != 0 {
+        return None;
+    }
+    let px = len / 3;
+    for w in [1920u32, 1680, 1600, 1440, 1366, 1280, 1024, 854, 800, 720, 640, 480, 426, 320] {
+        let w = w as usize;
+        if w == 0 || px % w != 0 {
+            continue;
+        }
+        let h = px / w;
+        if (1..=4320).contains(&h) {
+            return Some((w as u32, h as u32));
+        }
+    }
+    None
+}
+
+fn scale_rgb24_nearest(src: &[u8], src_w: u32, src_h: u32, dst_w: u32, dst_h: u32) -> Vec<u8> {
+    let src_w = src_w as usize;
+    let src_h = src_h as usize;
+    let dst_w = dst_w as usize;
+    let dst_h = dst_h as usize;
+    let mut out = vec![0u8; dst_w * dst_h * 3];
+    for dy in 0..dst_h {
+        let sy = dy * src_h / dst_h;
+        for dx in 0..dst_w {
+            let sx = dx * src_w / dst_w;
+            let si = (sy * src_w + sx) * 3;
+            let di = (dy * dst_w + dx) * 3;
+            if si + 2 < src.len() {
+                out[di] = src[si];
+                out[di + 1] = src[si + 1];
+                out[di + 2] = src[si + 2];
+            }
+        }
+    }
+    out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn infer_1080p_rgb24() {
+        let (w, h) = infer_rgb24_dimensions(1920 * 1080 * 3).unwrap();
+        assert_eq!((w, h), (1920, 1080));
+    }
 }

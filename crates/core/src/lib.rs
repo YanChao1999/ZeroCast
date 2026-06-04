@@ -1,8 +1,10 @@
 mod pipeline;
 mod profile;
+mod qos;
 
 pub use pipeline::{CopyTier, ReceiverOutput, SenderCapture};
 pub use profile::{ProfileKind, ReceiverCapability, StreamProfile};
+pub use qos::{DeviceClass, QosAction, QosController, QosConfig, StreamMetricsSample};
 
 /// Workspace version string (`CARGO_PKG_VERSION` from the building crate).
 pub fn version() -> &'static str {
