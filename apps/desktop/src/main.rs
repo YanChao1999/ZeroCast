@@ -161,6 +161,11 @@ async fn main() -> anyhow::Result<()> {
         Some("stream") => {
             let mut argv: Vec<String> = args.collect();
             let discover = take_flag(&mut argv, "--discover");
+            let test_cycle = take_flag(&mut argv, "--test-cycle");
+            let max_frames: u64 = match require_option_arg(&mut argv, "--frames", "N")? {
+                Some(s) => s.parse().context("--frames must be a positive integer")?,
+                None => 0,
+            };
             let profile_name =
                 require_option_arg(&mut argv, "--profile", "low|med|high|auto")?;
             let profile_kind = match profile_name.as_deref() {
@@ -263,9 +268,21 @@ async fn main() -> anyhow::Result<()> {
                 }
             };
 
+            if max_frames > 0 {
+                eprintln!("stream: will stop after {max_frames} frames");
+            }
             println!(
-                "Streaming H.264 over RTP (ffmpeg CLI): {} -> {} ({}x{} @ {} fps, Ctrl+C to stop)",
-                local, target, width, height, fps
+                "Streaming H.264 over RTP (ffmpeg CLI): {} -> {} ({}x{} @ {} fps{})",
+                local,
+                target,
+                width,
+                height,
+                fps,
+                if max_frames > 0 {
+                    format!(", --frames {max_frames}")
+                } else {
+                    ", Ctrl+C to stop".into()
+                }
             );
             let qos = zerocast_transport::StreamQosOpts {
                 display_w: display.width,
@@ -275,7 +292,14 @@ async fn main() -> anyhow::Result<()> {
                 device_class: qos_device_class,
             };
             zerocast_transport::capture_encode_and_stream_with_qos(
-                &local, &target, width, height, fps, 0, Some(qos),
+                &local,
+                &target,
+                width,
+                height,
+                fps,
+                max_frames,
+                Some(qos),
+                test_cycle,
             )
             .await?;
         }
@@ -356,7 +380,8 @@ async fn main() -> anyhow::Result<()> {
                  zerocast_desktop cap <local> <target>\n  \
                  zerocast_desktop stream <local> <target> [width] [height] [fps]\n  \
                  zerocast_desktop stream <local> --discover [--profile low|med|high|auto]\n  \
-                 zerocast_desktop stream <local> <target> --profile auto\n  \
+                 zerocast_desktop stream <local> <target> --profile auto [--frames N] [--test-cycle]\n  \
+                 zerocast_desktop stream <local> <target> --profile low --frames 11 --test-cycle\n  \
                  zerocast_desktop recv <local> <width> <height> [fps] [--no-mdns]\n  \
                  zerocast_desktop recv <local> --profile low|med|high|auto [--no-mdns]\n  \
                  zerocast_desktop recv-log <local>\n  \

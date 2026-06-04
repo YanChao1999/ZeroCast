@@ -10,6 +10,7 @@ mod display;
 mod encoder;
 mod h264_rtp;
 mod receiver_view;
+mod test_pattern;
 
 pub use decoder::decode_access_unit_rgb24;
 pub use display::RgbFrame;
@@ -18,6 +19,7 @@ pub use encoder::{
     DEFAULT_WIDTH,
 };
 pub use h264_rtp::nalus_to_annex_b;
+pub use test_pattern::{decoded_cycle_from_rgb, test_cycle_frame, CYCLE_COUNT};
 
 /// Optional QoS context for `capture_encode_and_stream` (sender-side metrics).
 #[derive(Debug, Clone, Copy)]
@@ -388,7 +390,7 @@ pub async fn capture_encode_and_stream(
     fps: u32,
     max_frames: u64,
 ) -> anyhow::Result<()> {
-    capture_encode_and_stream_with_qos(local, target, width, height, fps, max_frames, None).await
+    capture_encode_and_stream_with_qos(local, target, width, height, fps, max_frames, None, false).await
 }
 
 pub async fn capture_encode_and_stream_with_qos(
@@ -399,13 +401,19 @@ pub async fn capture_encode_and_stream_with_qos(
     fps: u32,
     max_frames: u64,
     qos: Option<StreamQosOpts>,
+    test_cycle: bool,
 ) -> anyhow::Result<()> {
     // Screen + network setup before ffmpeg: a long gap after the first stdin writes
     // makes ffmpeg's pipe encoder stop producing output on Windows.
-    let mut screen = zerocast_platform::ScreenCapture::open(width, height)?;
+    let (screen, first_frame) = if test_cycle {
+        eprintln!("stream: test-cycle mode (10-color pattern, cycle in logs)");
+        (None, test_pattern::test_cycle_frame(width, height, 0))
+    } else {
+        let mut screen = zerocast_platform::ScreenCapture::open(width, height)?;
+        let first = screen.capture_frame()?;
+        (Some(screen), first)
+    };
     let sender = Sender::bind(local, target).await?;
-    // Capture before ffmpeg so warm-up frames are not followed by a long idle gap.
-    let first_frame = screen.capture_frame()?;
     let video_encoder = FfmpegCliEncoder::open_with_warmup(width, height, fps, Some(&first_frame))?;
     stream_loop(
         local,
@@ -415,10 +423,11 @@ pub async fn capture_encode_and_stream_with_qos(
         fps,
         max_frames,
         video_encoder,
-        Some(screen),
+        screen,
         Some(sender),
         Some(first_frame),
         qos,
+        test_cycle,
     )
     .await
 }
@@ -444,6 +453,7 @@ pub async fn capture_encode_and_stream_with_encoder(
         None,
         None,
         None,
+        false,
     )
     .await
 }
@@ -489,6 +499,7 @@ async fn stream_loop(
     sender: Option<Sender>,
     first_frame: Option<Vec<u8>>,
     qos: Option<StreamQosOpts>,
+    test_cycle: bool,
 ) -> anyhow::Result<()> {
     use zerocast_core::{QosAction, QosController, StreamMetricsSample, StreamProfile};
 
@@ -512,9 +523,13 @@ async fn stream_loop(
         eprintln!("qos: monitoring sender metrics (hot reconfigure enabled)");
     }
 
-    let mut screen = match screen {
-        Some(s) => s,
-        None => zerocast_platform::ScreenCapture::open(width, height)?,
+    let mut screen = if test_cycle {
+        None
+    } else {
+        Some(match screen {
+            Some(s) => s,
+            None => zerocast_platform::ScreenCapture::open(width, height)?,
+        })
     };
     let mut sender = match sender {
         Some(s) => s,
@@ -531,20 +546,27 @@ async fn stream_loop(
 
     loop {
         if max_frames > 0 && frame_index >= max_frames {
+            eprintln!("stream: finished after {max_frames} frames");
             break;
         }
 
         let frame_start = std::time::Instant::now();
-        if frame_index == 0 || frame_index % 30 == 0 {
+        let cycle = (frame_index as u32) % test_pattern::CYCLE_COUNT;
+        if test_cycle {
+            eprintln!("streaming frame {frame_index} (test-cycle {cycle})...");
+        } else if frame_index == 0 || frame_index % 30 == 0 {
             eprintln!("streaming frame {frame_index}...");
         }
         let frame = if frame_index == 0 {
             match &first_frame {
                 Some(f) => f.clone(),
-                None => screen.capture_frame()?,
+                None if test_cycle => test_pattern::test_cycle_frame(width, height, 0),
+                None => screen.as_mut().unwrap().capture_frame()?,
             }
+        } else if test_cycle {
+            test_pattern::test_cycle_frame(width, height, cycle)
         } else {
-            screen.capture_frame()?
+            screen.as_mut().unwrap().capture_frame()?
         };
         let encode_start = std::time::Instant::now();
         let (nalus, pts_ns) = video_encoder.encode_frame(&frame, frame_index)?;
@@ -611,16 +633,23 @@ async fn stream_loop(
                 match action {
                     QosAction::Hold => {}
                     QosAction::RecommendDowngrade(p) | QosAction::RecommendUpgrade(p) => {
-                        apply_qos_stream_profile(
-                            p,
-                            &mut width,
-                            &mut height,
-                            &mut fps,
-                            &mut frame_duration,
-                            &mut screen,
-                            &mut video_encoder,
-                        )?;
-                        controller.on_profile_applied(p);
+                        if test_cycle {
+                            eprintln!(
+                                "qos: ignoring {:?} during --test-cycle",
+                                p.name
+                            );
+                        } else if let Some(screen) = screen.as_mut() {
+                            apply_qos_stream_profile(
+                                p,
+                                &mut width,
+                                &mut height,
+                                &mut fps,
+                                &mut frame_duration,
+                                screen,
+                                &mut video_encoder,
+                            )?;
+                            controller.on_profile_applied(p);
+                        }
                     }
                 }
             }
