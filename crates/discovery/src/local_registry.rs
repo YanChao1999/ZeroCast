@@ -1,5 +1,5 @@
 use crate::net::primary_ipv4;
-use crate::StreamAdvertisement;
+use crate::{StreamAdvertisement, DEFAULT_STREAM_FPS};
 use anyhow::{Context, Result};
 use std::fs;
 use std::io::Write;
@@ -53,7 +53,8 @@ pub fn write_receiver(ad: &StreamAdvertisement) -> Result<()> {
     writeln!(f, "fps={}", ad.fps)?;
     writeln!(f, "max_w={}", ad.effective_max_width())?;
     writeln!(f, "max_h={}", ad.effective_max_height())?;
-    writeln!(f, "max_fps={}", ad.effective_max_fps(15))?;
+    let session_fps = ad.session_fps_or(DEFAULT_STREAM_FPS);
+    writeln!(f, "max_fps={}", ad.effective_max_fps(session_fps))?;
     Ok(())
 }
 

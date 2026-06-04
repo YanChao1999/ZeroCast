@@ -1,6 +1,9 @@
 use crate::daemon::create_daemon;
 use crate::local_registry;
-use crate::{advertisement_from_txt, parse_txt_properties, StreamAdvertisement, SERVICE_TYPE};
+use crate::{
+    advertisement_from_txt, parse_txt_properties, StreamAdvertisement, DEFAULT_STREAM_FPS,
+    SERVICE_TYPE,
+};
 use anyhow::{bail, Context, Result};
 use mdns_sd::{ServiceEvent, ServiceInfo};
 use std::collections::HashMap;
@@ -142,15 +145,13 @@ pub fn pick_receiver(streams: Vec<DiscoveredStream>) -> Result<StreamAdvertiseme
     eprintln!("Discovered ZeroCast receivers:");
     for (i, s) in streams.iter().enumerate() {
         let a = &s.advertisement;
-        let cap_note = if a.effective_max_width() != a.width
-            || a.effective_max_height() != a.height
-            || a.effective_max_fps(15) != a.effective_fps(15)
-        {
+        let session_fps = a.session_fps_or(DEFAULT_STREAM_FPS);
+        let cap_note = if a.explicit_caps_differ_from_session() {
             format!(
                 ", cap {}x{} @ {} fps",
                 a.effective_max_width(),
                 a.effective_max_height(),
-                a.effective_max_fps(15)
+                a.effective_max_fps(session_fps)
             )
         } else {
             String::new()

@@ -24,6 +24,9 @@ pub const SERVICE_TYPE: &str = "_zerocast._udp.local.";
 /// TXT property: protocol / API version.
 pub const TXT_VERSION: &str = "v";
 
+/// Fallback when session `fps` is unset (matches transport default).
+pub const DEFAULT_STREAM_FPS: u32 = 15;
+
 /// Parsed mDNS TXT stream properties.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct TxtStreamProps {
@@ -93,12 +96,24 @@ impl StreamAdvertisement {
         }
     }
 
-    pub fn effective_max_fps(&self, default_fps: u32) -> u32 {
+    pub fn effective_max_fps(&self, session_fps: u32) -> u32 {
         if self.max_fps > 0 {
             self.max_fps
         } else {
-            self.effective_fps(default_fps)
+            session_fps
         }
+    }
+
+    /// Session fps used for cap fallback (`fps` when advertised, else `session_fps`).
+    pub fn session_fps_or(&self, fallback_fps: u32) -> u32 {
+        self.effective_fps(fallback_fps)
+    }
+
+    /// True when explicit TXT `max_*` values differ from session `w`/`h`/`fps`.
+    pub fn explicit_caps_differ_from_session(&self) -> bool {
+        (self.max_width > 0 && self.max_width != self.width)
+            || (self.max_height > 0 && self.max_height != self.height)
+            || (self.max_fps > 0 && self.max_fps != self.fps)
     }
 }
 
@@ -207,7 +222,7 @@ mod tests {
             max_fps: 0,
         };
         assert_eq!(ad.effective_max_width(), 426);
-        assert_eq!(ad.effective_max_fps(30), 15);
+        assert_eq!(ad.effective_max_fps(ad.session_fps_or(30)), 15);
     }
 
     /// Registers a receiver and browses on the same host (needs UDP 5353 / multicast).

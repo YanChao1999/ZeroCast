@@ -60,7 +60,7 @@ fn negotiate_stream_dims(
     let recv = ReceiverCapability {
         max_width: ad.effective_max_width(),
         max_height: ad.effective_max_height(),
-        max_fps: ad.effective_max_fps(default_fps),
+        max_fps: ad.effective_max_fps(ad.session_fps_or(default_fps)),
     };
     let sender = match profile_kind {
         Some(kind) => StreamProfile::from_kind(
@@ -77,7 +77,12 @@ fn negotiate_stream_dims(
         },
     };
     let negotiated = sender.capped_for_receiver(recv);
-    if profile_kind.is_some() || negotiated.width != ad.width || negotiated.height != ad.height {
+    let session_fps = ad.effective_fps(default_fps);
+    if profile_kind.is_some()
+        || negotiated.width != ad.width
+        || negotiated.height != ad.height
+        || negotiated.fps != session_fps
+    {
         eprintln!(
             "discover: negotiated {}x{} @ {} fps (recv cap {}x{} @ {} fps)",
             negotiated.width,
