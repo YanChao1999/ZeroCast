@@ -25,7 +25,7 @@ jobs:
       - name: FFmpeg integration (426p + 720p roundtrip)
         run: cargo test -p zerocast_transport --test ffmpeg_integration
       - name: QoS controller tests
-        run: cargo test -p zerocast_core qos::
+        run: "cargo test -p zerocast_core qos::"
 
   test-windows:
     name: test (windows)
@@ -44,7 +44,7 @@ jobs:
       - name: FFmpeg integration
         run: cargo test -p zerocast_transport --test ffmpeg_integration
       - name: QoS controller tests
-        run: cargo test -p zerocast_core qos::
+        run: "cargo test -p zerocast_core qos::"
 
   test-macos:
     name: test (macos)
@@ -61,7 +61,7 @@ jobs:
       - name: FFmpeg integration
         run: cargo test -p zerocast_transport --test ffmpeg_integration
       - name: QoS controller tests
-        run: cargo test -p zerocast_core qos::
+        run: "cargo test -p zerocast_core qos::"
 
   # Mobile apps are not in-tree yet; keep core + platform (stub capture) compiling on device targets.
   check-ios:
