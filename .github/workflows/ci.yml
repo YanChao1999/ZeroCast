@@ -16,8 +16,12 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - name: Install ffmpeg
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg
+      - name: Install system deps (X11 for scrap/minifb, ffmpeg)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            ffmpeg \
+            libx11-dev libxcb1-dev libxcb-shm0-dev libxcb-randr0-dev
       - name: Verify ffmpeg
         run: ffmpeg -version | head -n 1
       - name: Unit tests (workspace)
@@ -53,7 +57,8 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - uses: FedericoCarboni/setup-ffmpeg@v3
+      - name: Install ffmpeg
+        run: brew install ffmpeg
       - name: Verify ffmpeg
         run: ffmpeg -version | head -n 1
       - name: Unit tests (workspace)
