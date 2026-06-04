@@ -20,6 +20,7 @@ cargo build --workspace
 cargo test --workspace
 # FFmpeg roundtrip (426p + 720p IDR size); CI runs this automatically:
 cargo test -p zerocast_transport --test ffmpeg_integration
+# includes 10-frame cycle live-pipe roundtrip at 426p
 ```
 
 Run the desktop app (requires `ffmpeg` on PATH for H.264 streaming):
