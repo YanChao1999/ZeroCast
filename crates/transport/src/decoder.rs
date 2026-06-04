@@ -71,6 +71,11 @@ pub fn decode_access_unit_rgb24(
     let rgb = output.stdout;
     if rgb.len() < expected {
         let stderr = String::from_utf8_lossy(&output.stderr);
+        if let Ok(retry) = decode_access_unit_rgb24_with_bsf(annex_b, hint_width, hint_height) {
+            if retry.0.len() >= expected {
+                return Ok(retry);
+            }
+        }
         bail!(
             "ffmpeg decode short read: got {} bytes, expected {} ({}x{}); stderr: {}",
             rgb.len(),
@@ -95,6 +100,70 @@ pub fn decode_access_unit_rgb24(
     };
     let scaled = scale_rgb24_nearest(&rgb, src_w, src_h, hint_width, hint_height);
     Ok((scaled, hint_width, hint_height))
+}
+
+/// Retry path for ffmpeg builds that need the Annex-B BSF on a pipe input.
+fn decode_access_unit_rgb24_with_bsf(
+    annex_b: &[u8],
+    hint_width: u32,
+    hint_height: u32,
+) -> Result<(Vec<u8>, u32, u32)> {
+    let scale = format!(
+        "scale={hint_width}:{hint_height}:force_original_aspect_ratio=disable:flags=fast_bilinear"
+    );
+    let mut child = Command::new("ffmpeg");
+    child
+        .args([
+            "-nostdin",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-probesize",
+            "65536",
+            "-analyzeduration",
+            "500000",
+            "-f",
+            "h264",
+            "-i",
+            "-",
+            "-bsf:v",
+            "h264_mp4toannexb",
+            "-an",
+            "-vf",
+            &scale,
+            "-pix_fmt",
+            "rgb24",
+            "-vframes",
+            "1",
+            "-f",
+            "rawvideo",
+            "-",
+        ])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    let mut child = child.spawn().context("failed to spawn ffmpeg decoder (bsf)")?;
+    {
+        let mut stdin = child.stdin.take().context("ffmpeg stdin missing")?;
+        stdin.write_all(annex_b)?;
+        stdin.flush().ok();
+    }
+    let output = child.wait_with_output().context("ffmpeg decoder (bsf) wait")?;
+    if !output.status.success() {
+        bail!(
+            "ffmpeg decode (bsf) failed: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        );
+    }
+    let expected = (hint_width as usize) * (hint_height as usize) * 3;
+    let mut rgb = output.stdout;
+    if rgb.len() < expected {
+        bail!("ffmpeg decode (bsf) short read");
+    }
+    if rgb.len() > expected {
+        rgb.truncate(expected);
+    }
+    Ok((rgb, hint_width, hint_height))
 }
 
 fn infer_rgb24_dimensions(len: usize) -> Option<(u32, u32)> {

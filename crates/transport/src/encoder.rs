@@ -117,6 +117,12 @@ impl FfmpegCliEncoder {
             Ok((backend, warmup_params)) => {
                 if !warmup_params.is_empty() {
                     param_nals = warmup_params;
+                } else if param_nals.is_empty() {
+                    if let Some(warmup) = warmup_rgb24 {
+                        if let Ok(nals) = prime_param_nals(warmup, width, height, fps) {
+                            param_nals = nals;
+                        }
+                    }
                 }
                 eprintln!("encoder: live ffmpeg pipe ({}x{} @ {} fps)", width, height, fps);
                 Ok(Self {
@@ -459,14 +465,10 @@ fn try_spawn_ffmpeg(
 ) -> std::io::Result<(EncoderBackend, Vec<Vec<u8>>)> {
     let size = format!("{width}x{height}");
     let fps_s = fps.to_string();
-    #[cfg(windows)]
+    // Every frame is an IDR with inline SPS/PPS so stateless one-shot ffmpeg decode works
+    // (recv path and integration tests decode each access unit in isolation).
     let gop = "1".to_string();
-    #[cfg(not(windows))]
-    let gop = fps.max(1).to_string();
-    #[cfg(windows)]
     let x264_params = "repeat-headers=0:annexb=1:nal-hrd=none:sync-lookahead=0:sliced-threads=0:slices=1:slice-max-size=0";
-    #[cfg(not(windows))]
-    let x264_params = "repeat-headers=1:annexb=1:nal-hrd=none:sync-lookahead=0:sliced-threads=0:slices=1:slice-max-size=0";
 
     // `-` is more reliable than `pipe:0` / `pipe:1` on Windows for subprocess pipes.
     let mut child = Command::new("ffmpeg");
@@ -557,13 +559,28 @@ fn try_spawn_ffmpeg(
         stdin.flush()?;
     }
     // Let the reader flush warmup NALUs; keep SPS/PPS for stateless per-frame decode.
-    thread::sleep(Duration::from_millis(150));
+    thread::sleep(Duration::from_millis(250));
     let mut warmup_param_nals = Vec::new();
     while let Ok(batch) = frame_rx.try_recv() {
         for n in batch {
             if matches!(nalu_type_of(&n), Some(7 | 8)) {
                 warmup_param_nals.push(n);
             }
+        }
+    }
+    // Block briefly for slow CI/WSL runners that deliver param sets after the sleep.
+    let drain_deadline = std::time::Instant::now() + Duration::from_millis(500);
+    while std::time::Instant::now() < drain_deadline {
+        match frame_rx.recv_timeout(Duration::from_millis(50)) {
+            Ok(batch) => {
+                for n in batch {
+                    if matches!(nalu_type_of(&n), Some(7 | 8)) {
+                        warmup_param_nals.push(n);
+                    }
+                }
+            }
+            Err(mpsc::RecvTimeoutError::Timeout) => {}
+            Err(mpsc::RecvTimeoutError::Disconnected) => break,
         }
     }
 
