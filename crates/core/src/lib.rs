@@ -3,7 +3,10 @@ mod profile;
 mod qos;
 
 pub use pipeline::{CopyTier, ReceiverOutput, SenderCapture};
-pub use profile::{ProfileKind, ReceiverCapability, StreamProfile};
+pub use profile::{
+    negotiate_for_receiver, receiver_capability_for_profile, ProfileKind, ReceiverCapability,
+    StreamProfile,
+};
 pub use qos::{DeviceClass, QosAction, QosController, QosConfig, StreamMetricsSample};
 
 /// Workspace version string (`CARGO_PKG_VERSION` from the building crate).

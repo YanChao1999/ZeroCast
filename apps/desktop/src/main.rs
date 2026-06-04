@@ -80,9 +80,10 @@ fn negotiate_stream_dims(
         max_height: ad.effective_max_height(),
         max_fps: ad.effective_max_fps(ad.session_fps_or(default_fps)),
     };
-    let sender = match profile_kind {
-        Some(kind) => StreamProfile::from_kind(
+    let negotiated = match profile_kind {
+        Some(kind) => zerocast_core::negotiate_for_receiver(
             kind,
+            recv,
             display.width,
             display.height,
             display.refresh_hz,
@@ -92,9 +93,9 @@ fn negotiate_stream_dims(
             width: ad.width,
             height: ad.height,
             fps: ad.effective_fps(default_fps),
-        },
+        }
+        .capped_for_receiver(recv),
     };
-    let negotiated = sender.capped_for_receiver(recv);
     let session_fps = ad.effective_fps(default_fps);
     if profile_kind.is_some()
         || negotiated.width != ad.width
