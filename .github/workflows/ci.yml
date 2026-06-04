@@ -81,6 +81,35 @@ jobs:
       - name: cargo check (core, platform)
         run: cargo check -p zerocast_core -p zerocast_platform --target aarch64-apple-ios-sim
 
+  coverage-linux:
+    name: coverage (linux)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: llvm-tools-preview
+      - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@cargo-llvm-cov
+      - name: Install system deps (X11 for scrap/minifb, ffmpeg)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            ffmpeg \
+            libx11-dev libxcb1-dev libxcb-shm0-dev libxcb-randr0-dev
+      - name: Collect LLVM coverage (line + branch)
+        run: |
+          cargo llvm-cov test --workspace --lib --no-report
+          cargo llvm-cov test -p zerocast_transport --test ffmpeg_integration --no-report
+          cargo llvm-cov report --branch --summary-only
+          cargo llvm-cov report --branch --lcov --output-path lcov.info
+      - name: Upload lcov artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-lcov
+          path: lcov.info
+          if-no-files-found: error
+
   check-android:
     name: check (android)
     runs-on: ubuntu-latest
