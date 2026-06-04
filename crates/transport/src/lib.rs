@@ -405,8 +405,14 @@ pub async fn capture_encode_and_stream_with_qos(
 ) -> anyhow::Result<()> {
     // Screen + network setup before ffmpeg: a long gap after the first stdin writes
     // makes ffmpeg's pipe encoder stop producing output on Windows.
-    let (screen, first_frame) = if test_cycle {
+    if test_cycle {
         eprintln!("stream: test-cycle mode (10-color pattern, cycle in logs)");
+    }
+    if test_cycle || (max_frames > 0 && max_frames <= 30) {
+        eprintln!("stream: waiting 1s (start recv before this if not already running)");
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+    }
+    let (screen, first_frame) = if test_cycle {
         (None, test_pattern::test_cycle_frame(width, height, 0))
     } else {
         let mut screen = zerocast_platform::ScreenCapture::open(width, height)?;

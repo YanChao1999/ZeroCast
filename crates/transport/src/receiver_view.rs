@@ -78,7 +78,10 @@ pub async fn run_with_display(
                 };
                 if decode_tx_rtp.send(job).is_ok() {
                     frames_queued += 1;
-                    if frames_queued == 1 || frames_queued % 60 == 0 {
+                    if frames_queued == 1
+                        || frames_queued <= 20
+                        || frames_queued % 60 == 0
+                    {
                         eprintln!("receiver: queued frame {frames_queued} for decode");
                     }
                 }
