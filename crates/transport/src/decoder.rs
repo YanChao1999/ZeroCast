@@ -33,6 +33,8 @@ pub fn decode_access_unit_rgb24(
             "low_delay",
             "-f",
             "h264",
+            "-c:v",
+            "h264",
             "-i",
             "-",
             "-an",
@@ -54,6 +56,7 @@ pub fn decode_access_unit_rgb24(
     {
         let mut stdin = child.stdin.take().context("ffmpeg stdin missing")?;
         stdin.write_all(annex_b)?;
+        stdin.flush().ok();
     }
 
     let output = child

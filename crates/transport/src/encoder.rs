@@ -114,7 +114,10 @@ impl FfmpegCliEncoder {
         }
 
         match try_spawn_ffmpeg(width, height, fps, warmup_rgb24) {
-            Ok(backend) => {
+            Ok((backend, warmup_params)) => {
+                if !warmup_params.is_empty() {
+                    param_nals = warmup_params;
+                }
                 eprintln!("encoder: live ffmpeg pipe ({}x{} @ {} fps)", width, height, fps);
                 Ok(Self {
                     width,
@@ -222,6 +225,20 @@ impl VideoEncoder for FfmpegCliEncoder {
                 match frame_rx.recv_timeout(PIPE_ATTEMPT_TIMEOUT) {
                     Ok(nalus) if !nalus.is_empty() => {
                         let nalus = drain_pipe_nal_batches(nalus, frame_rx);
+                        let inline_params: Vec<Vec<u8>> = nalus
+                            .iter()
+                            .filter(|n| matches!(nalu_type_of(n), Some(7 | 8)))
+                            .cloned()
+                            .collect();
+                        if !inline_params.is_empty() {
+                            self.param_nals = inline_params;
+                        } else if self.param_nals.is_empty() {
+                            if let Ok(nals) =
+                                prime_param_nals(rgb24, self.width, self.height, self.fps)
+                            {
+                                self.param_nals = nals;
+                            }
+                        }
                         let nalus = self.maybe_attach_params(nalus)?;
                         Ok((nalus, self.pts_ns(frame_index)))
                     }
@@ -439,7 +456,7 @@ fn try_spawn_ffmpeg(
     height: u32,
     fps: u32,
     warmup_rgb24: Option<&[u8]>,
-) -> std::io::Result<EncoderBackend> {
+) -> std::io::Result<(EncoderBackend, Vec<Vec<u8>>)> {
     let size = format!("{width}x{height}");
     let fps_s = fps.to_string();
     #[cfg(windows)]
@@ -539,16 +556,26 @@ fn try_spawn_ffmpeg(
         stdin.write_all(warmup)?;
         stdin.flush()?;
     }
-    // Let the reader flush warmup NALUs (non-blocking drain).
+    // Let the reader flush warmup NALUs; keep SPS/PPS for stateless per-frame decode.
     thread::sleep(Duration::from_millis(150));
-    while frame_rx.try_recv().is_ok() {}
+    let mut warmup_param_nals = Vec::new();
+    while let Ok(batch) = frame_rx.try_recv() {
+        for n in batch {
+            if matches!(nalu_type_of(&n), Some(7 | 8)) {
+                warmup_param_nals.push(n);
+            }
+        }
+    }
 
-    Ok(EncoderBackend::Pipe {
-        child,
-        stdin,
-        frame_rx,
-        reader_handle,
-    })
+    Ok((
+        EncoderBackend::Pipe {
+            child,
+            stdin,
+            frame_rx,
+            reader_handle,
+        },
+        warmup_param_nals,
+    ))
 }
 
 /// Merge per-slice batches from the pipe reader into one access unit per captured frame.
