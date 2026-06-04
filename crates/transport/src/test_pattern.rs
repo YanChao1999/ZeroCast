@@ -58,9 +58,40 @@ fn color_distance(a: (u8, u8, u8), b: (u8, u8, u8)) -> u32 {
 }
 
 /// Match decoded RGB to nearest cycle index (lossy H.264 safe).
-pub fn decoded_cycle_from_rgb(rgb: &[u8]) -> u32 {
-    let mean = frame_mean_rgb(rgb);
+///
+/// Uses the interior of the frame (skips row-0 tag bar and 10% margins) so mean
+/// color is dominated by the solid fill after lossy encode on Linux/macOS CI ffmpeg.
+pub fn decoded_cycle_from_rgb(rgb: &[u8], width: u32, height: u32) -> u32 {
+    let mean = frame_mean_rgb_interior(rgb, width, height);
     (0..CYCLE_COUNT)
         .min_by_key(|c| color_distance(mean, cycle_palette(*c)))
         .unwrap()
+}
+
+fn frame_mean_rgb_interior(rgb: &[u8], width: u32, height: u32) -> (u8, u8, u8) {
+    let w = width as usize;
+    let h = height as usize;
+    if w == 0 || h == 0 || rgb.len() < w * h * 3 {
+        return frame_mean_rgb(rgb);
+    }
+    let row_stride = w * 3;
+    let y0 = 1usize.max(h / 10);
+    let y1 = h.saturating_sub(h / 10).max(y0 + 1);
+    let x0 = w / 10;
+    let x1 = w.saturating_sub(w / 10).max(x0 + 1);
+    let (mut r, mut g, mut b, mut n) = (0u64, 0u64, 0u64, 0u64);
+    for y in y0..y1 {
+        let row = &rgb[y * row_stride..(y + 1) * row_stride];
+        for x in x0..x1 {
+            let o = x * 3;
+            r += row[o] as u64;
+            g += row[o + 1] as u64;
+            b += row[o + 2] as u64;
+            n += 1;
+        }
+    }
+    if n == 0 {
+        return frame_mean_rgb(rgb);
+    }
+    ((r / n) as u8, (g / n) as u8, (b / n) as u8)
 }

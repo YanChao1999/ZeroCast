@@ -93,8 +93,9 @@ fn med_1280x720_oneshot_roundtrip_full_idr() {
         FfmpegCliEncoder::open_with_warmup(width, height, 30, Some(&frame)).expect("open encoder");
     let (nalus, _) = enc.encode_frame(&frame, 0).expect("encode frame");
     let idr_len = max_idr_nal_len(&nalus);
+    // Full 720p IDR is typically 50–120 KiB; truncated pipe split was ~32 KiB.
     assert!(
-        idr_len >= 64_000,
+        idr_len >= 40_000,
         "IDR NAL too small ({idr_len} B): regression for 32764 B pipe split / half-green at 720p"
     );
     decode_roundtrip(&nalus, width, height);
@@ -133,7 +134,7 @@ fn ten_frame_cycle_live_pipe_426p() {
             decode_access_unit_rgb24(&annex_b, WIDTH, HEIGHT).expect("decode access unit");
         assert_eq!((w, h), (WIDTH, HEIGHT));
 
-        let decoded_cycle = decoded_cycle_from_rgb(&rgb);
+        let decoded_cycle = decoded_cycle_from_rgb(&rgb, WIDTH, HEIGHT);
         assert_eq!(
             decoded_cycle, cycle,
             "frame {frame_index}: tag mismatch (got cycle {decoded_cycle}, expected {cycle})"

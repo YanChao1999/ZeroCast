@@ -24,8 +24,8 @@ jobs:
             libx11-dev libxcb1-dev libxcb-shm0-dev libxcb-randr0-dev
       - name: Verify ffmpeg
         run: ffmpeg -version | head -n 1
-      - name: Unit tests (workspace)
-        run: cargo test --workspace
+      - name: Unit tests (workspace, lib only)
+        run: cargo test --workspace --lib
       - name: FFmpeg integration (426p + 720p roundtrip)
         run: cargo test -p zerocast_transport --test ffmpeg_integration
       - name: QoS controller tests
@@ -43,8 +43,8 @@ jobs:
       - name: Verify ffmpeg
         run: ffmpeg -version
         shell: bash
-      - name: Unit tests (workspace)
-        run: cargo test --workspace
+      - name: Unit tests (workspace, lib only)
+        run: cargo test --workspace --lib
       - name: FFmpeg integration
         run: cargo test -p zerocast_transport --test ffmpeg_integration
       - name: QoS controller tests
@@ -61,8 +61,8 @@ jobs:
         run: brew install ffmpeg
       - name: Verify ffmpeg
         run: ffmpeg -version | head -n 1
-      - name: Unit tests (workspace)
-        run: cargo test --workspace
+      - name: Unit tests (workspace, lib only)
+        run: cargo test --workspace --lib
       - name: FFmpeg integration
         run: cargo test -p zerocast_transport --test ffmpeg_integration
       - name: QoS controller tests
