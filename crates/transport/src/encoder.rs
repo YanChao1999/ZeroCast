@@ -554,10 +554,22 @@ fn try_spawn_ffmpeg(
 /// Merge per-slice batches from the pipe reader into one access unit per captured frame.
 fn drain_pipe_nal_batches(mut nalus: Vec<Vec<u8>>, frame_rx: &Receiver<Vec<Vec<u8>>>) -> Vec<Vec<u8>> {
     let deadline = std::time::Instant::now() + PIPE_SLICE_DRAIN;
+    let mut idle_ms = 0u64;
     while std::time::Instant::now() < deadline {
         match frame_rx.try_recv() {
-            Ok(batch) => nalus.extend(batch),
-            Err(_) => std::thread::sleep(Duration::from_millis(2)),
+            Ok(batch) => {
+                nalus.extend(batch);
+                idle_ms = 0;
+            }
+            Err(mpsc::TryRecvError::Empty) => {
+                // No more slice batches ready — don't spin for the full 50ms window.
+                if idle_ms >= 4 {
+                    break;
+                }
+                std::thread::sleep(Duration::from_millis(1));
+                idle_ms += 1;
+            }
+            Err(mpsc::TryRecvError::Disconnected) => break,
         }
     }
     coalesce_adjacent_vcl_nalus(nalus)
@@ -696,7 +708,8 @@ fn is_valid_nalu_start_at(buf: &[u8], start: usize) -> bool {
     matches!(nal_type_at(buf, start), Some(1 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12))
 }
 
-/// Boundaries inside RBSP: ignore type 1 (`0x000001` + 0x41…) — common false positive in IDR data.
+/// Boundaries for Annex-B scan. Type-1 (`0x000001` + 0x41…) inside large IDR RBSP is ignored
+/// (emulation false positive); real P/B slices at ≤640×360 use `slices=1` + `coalesce_adjacent_vcl_nalus`.
 fn is_probable_nalu_boundary(buf: &[u8], start: usize) -> bool {
     is_valid_nalu_start_at(buf, start)
         && matches!(nal_type_at(buf, start), Some(5 | 6 | 7 | 8 | 9))

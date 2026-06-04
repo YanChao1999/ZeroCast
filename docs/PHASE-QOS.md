@@ -108,10 +108,11 @@ Pi Zero W recv (426×240 @ 15 capable)
 | Done (v1 foundation) | Not done (v1 closed loop) |
 |----------------------|---------------------------|
 | `QosController` + hysteresis | RTCP loss / recv decode lag inputs |
-| `class=embedded` mDNS TXT | Hot reconfigure encoder without restart |
-| Negotiated session floor (no downgrade below discover caps) | Dynamic mDNS re-advertise on profile change |
+| `class=embedded` mDNS TXT | Dynamic mDNS re-advertise on profile change |
+| Negotiated session floor (no downgrade below discover caps) | |
 | Warmup windows; fps ratio ignored at session rung | |
-| Hot reconfigure capture + encoder on ladder change | Same-PC direct stream reads local registry caps; decoder rejects wrong-size RGB (no red shear) |
+| Hot reconfigure capture + encoder on ladder change | |
+| Same-PC registry caps for direct `stream`; decoder RGB size guard (no red shear) | |
 
 - [x] `QosController` module (metrics window, hysteresis) in `zerocast_core`
 - [x] Downgrade hints on: low fps ratio, encode_ms over frame budget (sender stats window)

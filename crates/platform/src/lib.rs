@@ -11,7 +11,7 @@ mod display;
 
 pub use display::{primary_display, PrimaryDisplay};
 
-use anyhow::Result;
+use anyhow::{bail, Result};
 
 /// Captures screen pixels as RGB24 for the video encoder.
 pub struct ScreenCapture {
@@ -71,7 +71,9 @@ impl ScreenCapture {
 
     /// Resize captured output without reopening the OS capturer (QoS hot reconfigure).
     pub fn reconfigure(&mut self, width: u32, height: u32) -> Result<()> {
-        assert!(width > 0 && height > 0, "width and height must be positive");
+        if width == 0 || height == 0 {
+            bail!("width and height must be positive");
+        }
         match &mut self.inner {
             #[cfg(any(windows, target_os = "macos", target_os = "linux"))]
             CaptureInner::Scrap(s) => {

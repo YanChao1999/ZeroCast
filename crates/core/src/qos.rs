@@ -1,7 +1,7 @@
 //! QoS v1 — observe sender metrics and recommend ladder changes (Phase QoS).
 //!
-//! Hot reconfigure of the encoder is not implemented yet; the controller logs
-//! recommendations until `stream` can restart the pipe at a new rung.
+//! `stream_loop` applies downgrade/upgrade recommendations by resizing capture
+//! and reopening the ffmpeg encoder at the new ladder rung.
 
 use crate::profile::{ReceiverCapability, StreamProfile};
 
