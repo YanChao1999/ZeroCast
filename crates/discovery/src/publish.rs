@@ -50,9 +50,21 @@ impl StreamPublisher {
         height: u32,
         fps: u32,
     ) -> Result<Self> {
+        Self::register_with_class(instance_name, port, width, height, fps, None)
+    }
+
+    /// Register with optional mDNS TXT `class` (e.g. `embedded` for edge recv).
+    pub fn register_with_class(
+        instance_name: &str,
+        port: u16,
+        width: u32,
+        height: u32,
+        fps: u32,
+        device_class: Option<&str>,
+    ) -> Result<Self> {
         let daemon = create_daemon()?;
         let host = format!("{}.local.", local_hostname());
-        let properties = [
+        let mut properties = vec![
             (TXT_VERSION.to_string(), "1".to_string()),
             ("w".to_string(), width.to_string()),
             ("h".to_string(), height.to_string()),
@@ -61,6 +73,9 @@ impl StreamPublisher {
             ("max_h".to_string(), height.to_string()),
             ("max_fps".to_string(), fps.to_string()),
         ];
+        if let Some(class) = device_class {
+            properties.push(("class".to_string(), class.to_string()));
+        }
         let addrs = local_ip_addrs();
         let info = ServiceInfo::new(
             SERVICE_TYPE,
@@ -93,6 +108,7 @@ impl StreamPublisher {
             max_width: width,
             max_height: height,
             max_fps: fps,
+            device_class: device_class.map(str::to_string),
         };
         local_registry::write_receiver(&local_ad)?;
         eprintln!(
@@ -156,5 +172,6 @@ pub fn advertisement_from_register(
         max_width: width,
         max_height: height,
         max_fps: fps,
+        device_class: None,
     }
 }

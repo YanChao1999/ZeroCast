@@ -26,6 +26,10 @@ fn spawn_decode_thread(
             }
             match decoder::decode_access_unit_rgb24(&job.annex_b, job.width, job.height) {
                 Ok((rgb24, w, h)) => {
+                    let expected = (w as usize) * (h as usize) * 3;
+                    if rgb24.len() != expected {
+                        continue;
+                    }
                     frames_ok += 1;
                     if frames_ok == 1 {
                         eprintln!("receiver: first frame decoded ({w}x{h})");
@@ -74,7 +78,10 @@ pub async fn run_with_display(
                 };
                 if decode_tx_rtp.send(job).is_ok() {
                     frames_queued += 1;
-                    if frames_queued == 1 || frames_queued % 60 == 0 {
+                    if frames_queued == 1
+                        || frames_queued <= 20
+                        || frames_queued % 60 == 0
+                    {
                         eprintln!("receiver: queued frame {frames_queued} for decode");
                     }
                 }

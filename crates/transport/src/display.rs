@@ -63,14 +63,16 @@ fn blit_rgb24(
     src_w: usize,
     src_h: usize,
 ) {
+    let expected = src_w.saturating_mul(src_h).saturating_mul(3);
+    if rgb.len() < expected {
+        return;
+    }
+    dst.fill(0);
     let w = dst_w.min(src_w);
     let h = dst_h.min(src_h);
     for y in 0..h {
         for x in 0..w {
             let si = (y * src_w + x) * 3;
-            if si + 2 >= rgb.len() {
-                return;
-            }
             let r = rgb[si] as u32;
             let g = rgb[si + 1] as u32;
             let b = rgb[si + 2] as u32;

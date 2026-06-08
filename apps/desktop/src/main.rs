@@ -49,6 +49,24 @@ fn log_primary_display() -> zerocast_platform::PrimaryDisplay {
     }
 }
 
+fn device_class_from_ad(ad: &zerocast_discovery::StreamAdvertisement) -> zerocast_core::DeviceClass {
+    ad.device_class
+        .as_deref()
+        .and_then(zerocast_core::DeviceClass::parse_txt)
+        .unwrap_or(zerocast_core::DeviceClass::Desktop)
+}
+
+fn receiver_capability_from_ad(
+    ad: &zerocast_discovery::StreamAdvertisement,
+    default_fps: u32,
+) -> zerocast_core::ReceiverCapability {
+    zerocast_core::ReceiverCapability {
+        max_width: ad.effective_max_width(),
+        max_height: ad.effective_max_height(),
+        max_fps: ad.effective_max_fps(ad.session_fps_or(default_fps)),
+    }
+}
+
 fn negotiate_stream_dims(
     ad: &zerocast_discovery::StreamAdvertisement,
     profile_kind: Option<zerocast_core::ProfileKind>,
@@ -62,9 +80,10 @@ fn negotiate_stream_dims(
         max_height: ad.effective_max_height(),
         max_fps: ad.effective_max_fps(ad.session_fps_or(default_fps)),
     };
-    let sender = match profile_kind {
-        Some(kind) => StreamProfile::from_kind(
+    let negotiated = match profile_kind {
+        Some(kind) => zerocast_core::negotiate_for_receiver(
             kind,
+            recv,
             display.width,
             display.height,
             display.refresh_hz,
@@ -74,9 +93,9 @@ fn negotiate_stream_dims(
             width: ad.width,
             height: ad.height,
             fps: ad.effective_fps(default_fps),
-        },
+        }
+        .capped_for_receiver(recv),
     };
-    let negotiated = sender.capped_for_receiver(recv);
     let session_fps = ad.effective_fps(default_fps);
     if profile_kind.is_some()
         || negotiated.width != ad.width
@@ -142,6 +161,11 @@ async fn main() -> anyhow::Result<()> {
         Some("stream") => {
             let mut argv: Vec<String> = args.collect();
             let discover = take_flag(&mut argv, "--discover");
+            let test_cycle = take_flag(&mut argv, "--test-cycle");
+            let max_frames: u64 = match require_option_arg(&mut argv, "--frames", "N")? {
+                Some(s) => s.parse().context("--frames must be a positive integer")?,
+                None => 0,
+            };
             let profile_name =
                 require_option_arg(&mut argv, "--profile", "low|med|high|auto")?;
             let profile_kind = match profile_name.as_deref() {
@@ -155,6 +179,9 @@ async fn main() -> anyhow::Result<()> {
                 argv.remove(0)
             };
 
+            let mut qos_recv_cap = None;
+            let mut qos_device_class = zerocast_core::DeviceClass::Desktop;
+
             let (target, width, height, fps) = if discover {
                 let found = zerocast_discovery::browse_streams(
                     zerocast_discovery::DEFAULT_BROWSE_TIMEOUT,
@@ -163,6 +190,11 @@ async fn main() -> anyhow::Result<()> {
                 let ad = zerocast_discovery::pick_receiver(found)?;
                 ad.validate_dimensions()?;
                 let target = ad.target_addr();
+                qos_recv_cap = Some(receiver_capability_from_ad(
+                    &ad,
+                    zerocast_transport::DEFAULT_FPS,
+                ));
+                qos_device_class = device_class_from_ad(&ad);
                 let (width, height, fps) = negotiate_stream_dims(
                     &ad,
                     profile_kind,
@@ -187,7 +219,30 @@ async fn main() -> anyhow::Result<()> {
                         )
                     })?;
                 argv.remove(0);
-                if let Some(kind) = profile_kind {
+                if let Some(ad) = zerocast_discovery::receiver_for_target(&target) {
+                    ad.validate_dimensions()?;
+                    qos_recv_cap = Some(receiver_capability_from_ad(
+                        &ad,
+                        zerocast_transport::DEFAULT_FPS,
+                    ));
+                    qos_device_class = device_class_from_ad(&ad);
+                    eprintln!(
+                        "local: matched receiver '{}' ({}x{} cap {}x{} @ {} fps)",
+                        ad.instance_name,
+                        ad.width,
+                        ad.height,
+                        ad.effective_max_width(),
+                        ad.effective_max_height(),
+                        ad.effective_max_fps(ad.session_fps_or(zerocast_transport::DEFAULT_FPS)),
+                    );
+                    let (w, h, f) = negotiate_stream_dims(
+                        &ad,
+                        profile_kind,
+                        &display,
+                        zerocast_transport::DEFAULT_FPS,
+                    );
+                    (target, w, h, f)
+                } else if let Some(kind) = profile_kind {
                     let (w, h, f) = profile_dims(kind, &display);
                     (target, w, h, f)
                 } else {
@@ -213,12 +268,40 @@ async fn main() -> anyhow::Result<()> {
                 }
             };
 
+            if max_frames > 0 {
+                eprintln!("stream: will stop after {max_frames} frames");
+            }
             println!(
-                "Streaming H.264 over RTP (ffmpeg CLI): {} -> {} ({}x{} @ {} fps, Ctrl+C to stop)",
-                local, target, width, height, fps
+                "Streaming H.264 over RTP (ffmpeg CLI): {} -> {} ({}x{} @ {} fps{})",
+                local,
+                target,
+                width,
+                height,
+                fps,
+                if max_frames > 0 {
+                    format!(", --frames {max_frames}")
+                } else {
+                    ", Ctrl+C to stop".into()
+                }
             );
-            zerocast_transport::capture_encode_and_stream(&local, &target, width, height, fps, 0)
-                .await?;
+            let qos = zerocast_transport::StreamQosOpts {
+                display_w: display.width,
+                display_h: display.height,
+                refresh_hz: display.refresh_hz,
+                recv_cap: qos_recv_cap,
+                device_class: qos_device_class,
+            };
+            zerocast_transport::capture_encode_and_stream_with_qos(
+                &local,
+                &target,
+                width,
+                height,
+                fps,
+                max_frames,
+                Some(qos),
+                test_cycle,
+            )
+            .await?;
         }
         Some("recv") => {
             let mut argv: Vec<String> = args.collect();
@@ -266,8 +349,12 @@ async fn main() -> anyhow::Result<()> {
             let publisher = if !no_mdns {
                 let port = zerocast_discovery::listen_port(&local)?;
                 let instance = zerocast_discovery::local_instance_name();
-                Some(zerocast_discovery::StreamPublisher::register(
-                    &instance, port, width, height, fps,
+                let device_class = match profile_kind {
+                    Some(zerocast_core::ProfileKind::Low) => Some("embedded"),
+                    _ => None,
+                };
+                Some(zerocast_discovery::StreamPublisher::register_with_class(
+                    &instance, port, width, height, fps, device_class,
                 )?)
             } else {
                 None
@@ -293,7 +380,8 @@ async fn main() -> anyhow::Result<()> {
                  zerocast_desktop cap <local> <target>\n  \
                  zerocast_desktop stream <local> <target> [width] [height] [fps]\n  \
                  zerocast_desktop stream <local> --discover [--profile low|med|high|auto]\n  \
-                 zerocast_desktop stream <local> <target> --profile auto\n  \
+                 zerocast_desktop stream <local> <target> --profile auto [--frames N] [--test-cycle]\n  \
+                 zerocast_desktop stream <local> <target> --profile low --frames 11 --test-cycle\n  \
                  zerocast_desktop recv <local> <width> <height> [fps] [--no-mdns]\n  \
                  zerocast_desktop recv <local> --profile low|med|high|auto [--no-mdns]\n  \
                  zerocast_desktop recv-log <local>\n  \

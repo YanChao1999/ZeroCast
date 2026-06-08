@@ -18,6 +18,8 @@ pub const DEFAULT_FPS: u32 = 30;
 const ANNEX_B_START_CODE: &[u8] = &[0, 0, 0, 1];
 
 const PIPE_ATTEMPT_TIMEOUT: Duration = Duration::from_millis(800);
+/// Collect trailing slice NAL batches for the same picture (pipe emits per VCL NAL).
+const PIPE_SLICE_DRAIN: Duration = Duration::from_millis(50);
 const WARMUP_FRAME_COUNT: usize = 2;
 /// Trait boundary for swapping CLI encoding with platform HW encoders later.
 pub trait VideoEncoder {
@@ -96,8 +98,32 @@ impl FfmpegCliEncoder {
             }
         }
 
+        let use_pipe = use_live_pipe_encoder(width, height);
+        if !use_pipe {
+            eprintln!(
+                "encoder: one-shot ffmpeg ({}x{} @ {} fps; pipe parser unsafe above 640x360)",
+                width, height, fps
+            );
+            return Ok(Self {
+                width,
+                height,
+                fps,
+                backend: EncoderBackend::Oneshot,
+                param_nals,
+            });
+        }
+
         match try_spawn_ffmpeg(width, height, fps, warmup_rgb24) {
-            Ok(backend) => {
+            Ok((backend, warmup_params)) => {
+                if !warmup_params.is_empty() {
+                    param_nals = warmup_params;
+                } else if param_nals.is_empty() {
+                    if let Some(warmup) = warmup_rgb24 {
+                        if let Ok(nals) = prime_param_nals(warmup, width, height, fps) {
+                            param_nals = nals;
+                        }
+                    }
+                }
                 eprintln!("encoder: live ffmpeg pipe ({}x{} @ {} fps)", width, height, fps);
                 Ok(Self {
                     width,
@@ -204,6 +230,21 @@ impl VideoEncoder for FfmpegCliEncoder {
 
                 match frame_rx.recv_timeout(PIPE_ATTEMPT_TIMEOUT) {
                     Ok(nalus) if !nalus.is_empty() => {
+                        let nalus = drain_pipe_nal_batches(nalus, frame_rx);
+                        let inline_params: Vec<Vec<u8>> = nalus
+                            .iter()
+                            .filter(|n| matches!(nalu_type_of(n), Some(7 | 8)))
+                            .cloned()
+                            .collect();
+                        if !inline_params.is_empty() {
+                            self.param_nals = inline_params;
+                        } else if self.param_nals.is_empty() {
+                            if let Ok(nals) =
+                                prime_param_nals(rgb24, self.width, self.height, self.fps)
+                            {
+                                self.param_nals = nals;
+                            }
+                        }
                         let nalus = self.maybe_attach_params(nalus)?;
                         Ok((nalus, self.pts_ns(frame_index)))
                     }
@@ -259,9 +300,11 @@ enum OneshotMode {
 
 fn oneshot_x264_params(mode: OneshotMode) -> &'static str {
     match mode {
-        OneshotMode::ParamSets => "annexb=1:sliced-threads=0:sync-lookahead=0",
+        OneshotMode::ParamSets => {
+            "annexb=1:sliced-threads=0:sync-lookahead=0:slices=1:slice-max-size=0"
+        }
         OneshotMode::WithHeaders => {
-            "repeat-headers=1:annexb=1:sliced-threads=0:sync-lookahead=0"
+            "repeat-headers=1:annexb=1:sliced-threads=0:sync-lookahead=0:slices=1:slice-max-size=0"
         }
     }
 }
@@ -314,6 +357,8 @@ fn run_oneshot_ffmpeg(
         &gop,
         "-threads",
         "1",
+        "-slices",
+        "1",
     ];
     let x264_owned = oneshot_x264_params(mode).to_string();
     args.push("-x264-params");
@@ -347,6 +392,16 @@ fn run_oneshot_ffmpeg(
 }
 
 /// One ffmpeg process per frame (slower, but reliable on Windows pipes).
+/// One-shot libx264 encode (full access unit). Used by integration tests.
+pub fn encode_access_unit_oneshot(
+    rgb24: &[u8],
+    width: u32,
+    height: u32,
+    fps: u32,
+) -> Result<Vec<Vec<u8>>> {
+    encode_frame_oneshot(rgb24, width, height, fps)
+}
+
 fn encode_frame_oneshot(
     rgb24: &[u8],
     width: u32,
@@ -407,17 +462,13 @@ fn try_spawn_ffmpeg(
     height: u32,
     fps: u32,
     warmup_rgb24: Option<&[u8]>,
-) -> std::io::Result<EncoderBackend> {
+) -> std::io::Result<(EncoderBackend, Vec<Vec<u8>>)> {
     let size = format!("{width}x{height}");
     let fps_s = fps.to_string();
-    #[cfg(windows)]
+    // Every frame is an IDR with inline SPS/PPS so stateless one-shot ffmpeg decode works
+    // (recv path and integration tests decode each access unit in isolation).
     let gop = "1".to_string();
-    #[cfg(not(windows))]
-    let gop = fps.max(1).to_string();
-    #[cfg(windows)]
-    let x264_params = "repeat-headers=0:annexb=1:nal-hrd=none:sync-lookahead=0:sliced-threads=0";
-    #[cfg(not(windows))]
-    let x264_params = "repeat-headers=1:annexb=1:nal-hrd=none:sync-lookahead=0:sliced-threads=0";
+    let x264_params = "repeat-headers=0:annexb=1:nal-hrd=none:sync-lookahead=0:sliced-threads=0:slices=1:slice-max-size=0";
 
     // `-` is more reliable than `pipe:0` / `pipe:1` on Windows for subprocess pipes.
     let mut child = Command::new("ffmpeg");
@@ -465,6 +516,8 @@ fn try_spawn_ffmpeg(
             "0",
             "-threads",
             "1",
+            "-slices",
+            "1",
             "-x264-params",
             x264_params,
             "-flags",
@@ -505,16 +558,65 @@ fn try_spawn_ffmpeg(
         stdin.write_all(warmup)?;
         stdin.flush()?;
     }
-    // Let the reader flush warmup NALUs (non-blocking drain).
-    thread::sleep(Duration::from_millis(150));
-    while frame_rx.try_recv().is_ok() {}
+    // Let the reader flush warmup NALUs; keep SPS/PPS for stateless per-frame decode.
+    thread::sleep(Duration::from_millis(250));
+    let mut warmup_param_nals = Vec::new();
+    while let Ok(batch) = frame_rx.try_recv() {
+        for n in batch {
+            if matches!(nalu_type_of(&n), Some(7 | 8)) {
+                warmup_param_nals.push(n);
+            }
+        }
+    }
+    // Block briefly for slow CI/WSL runners that deliver param sets after the sleep.
+    let drain_deadline = std::time::Instant::now() + Duration::from_millis(500);
+    while std::time::Instant::now() < drain_deadline {
+        match frame_rx.recv_timeout(Duration::from_millis(50)) {
+            Ok(batch) => {
+                for n in batch {
+                    if matches!(nalu_type_of(&n), Some(7 | 8)) {
+                        warmup_param_nals.push(n);
+                    }
+                }
+            }
+            Err(mpsc::RecvTimeoutError::Timeout) => {}
+            Err(mpsc::RecvTimeoutError::Disconnected) => break,
+        }
+    }
 
-    Ok(EncoderBackend::Pipe {
-        child,
-        stdin,
-        frame_rx,
-        reader_handle,
-    })
+    Ok((
+        EncoderBackend::Pipe {
+            child,
+            stdin,
+            frame_rx,
+            reader_handle,
+        },
+        warmup_param_nals,
+    ))
+}
+
+/// Merge per-slice batches from the pipe reader into one access unit per captured frame.
+fn drain_pipe_nal_batches(mut nalus: Vec<Vec<u8>>, frame_rx: &Receiver<Vec<Vec<u8>>>) -> Vec<Vec<u8>> {
+    let deadline = std::time::Instant::now() + PIPE_SLICE_DRAIN;
+    let mut idle_ms = 0u64;
+    while std::time::Instant::now() < deadline {
+        match frame_rx.try_recv() {
+            Ok(batch) => {
+                nalus.extend(batch);
+                idle_ms = 0;
+            }
+            Err(mpsc::TryRecvError::Empty) => {
+                // No more slice batches ready — don't spin for the full 50ms window.
+                if idle_ms >= 4 {
+                    break;
+                }
+                std::thread::sleep(Duration::from_millis(1));
+                idle_ms += 1;
+            }
+            Err(mpsc::TryRecvError::Disconnected) => break,
+        }
+    }
+    coalesce_adjacent_vcl_nalus(nalus)
 }
 
 fn stderr_drain_loop(mut stderr: ChildStderr) {
@@ -536,8 +638,8 @@ fn stderr_drain_loop(mut stderr: ChildStderr) {
 }
 
 fn stdout_reader_loop(mut stdout: ChildStdout, tx: Sender<Vec<Vec<u8>>>) {
-    let mut buf = Vec::with_capacity(256 * 1024);
-    let mut scratch = [0u8; 64 * 1024];
+    let mut buf = Vec::with_capacity(512 * 1024);
+    let mut scratch = vec![0u8; 256 * 1024];
     let mut pending: Vec<Vec<u8>> = Vec::new();
 
     loop {
@@ -608,15 +710,82 @@ fn drain_avcc_nalus(buf: &mut Vec<u8>, pending: &mut Vec<Vec<u8>>, tx: &Sender<V
     }
 }
 
+/// Rejoin VCL NALs split on a false `0x000001` inside the RBSP (common at 720p+).
+fn coalesce_adjacent_vcl_nalus(nalus: Vec<Vec<u8>>) -> Vec<Vec<u8>> {
+    let mut out: Vec<Vec<u8>> = Vec::new();
+    for nal in nalus {
+        if nalu_type_of(&nal).map(is_vcl_nal_type).unwrap_or(false) {
+            if let Some(last) = out.last_mut() {
+                if nalu_type_of(last).map(is_vcl_nal_type).unwrap_or(false) {
+                    last.extend_from_slice(vcl_rbsp_continuation(&nal));
+                    continue;
+                }
+            }
+        }
+        out.push(nal);
+    }
+    out
+}
+
+fn nal_body(nalu: &[u8]) -> &[u8] {
+    let start = find_annex_b_start(nalu).unwrap_or(0);
+    let header_end = start + start_code_len_at(nalu, start);
+    &nalu[header_end.min(nalu.len())..]
+}
+
+/// RBSP bytes after the NAL header byte (for joining a falsely split VCL NAL).
+fn vcl_rbsp_continuation(nalu: &[u8]) -> &[u8] {
+    let body = nal_body(nalu);
+    if body.len() > 1 {
+        &body[1..]
+    } else {
+        body
+    }
+}
+
+fn nal_type_at(buf: &[u8], start: usize) -> Option<u8> {
+    let header_end = start + start_code_len_at(buf, start);
+    buf.get(header_end).map(|b| b & 0x1f)
+}
+
+fn is_valid_nalu_start_at(buf: &[u8], start: usize) -> bool {
+    matches!(nal_type_at(buf, start), Some(1 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12))
+}
+
+/// Boundaries for Annex-B scan. Type-1 (`0x000001` + 0x41…) inside large IDR RBSP is ignored
+/// (emulation false positive); real P/B slices at ≤640×360 use `slices=1` + `coalesce_adjacent_vcl_nalus`.
+fn is_probable_nalu_boundary(buf: &[u8], start: usize) -> bool {
+    is_valid_nalu_start_at(buf, start)
+        && matches!(nal_type_at(buf, start), Some(5 | 6 | 7 | 8 | 9))
+}
+
+fn use_live_pipe_encoder(width: u32, height: u32) -> bool {
+    (width as u64) * (height as u64) <= 640 * 360
+}
+
+fn find_next_nalu_start(buf: &[u8], from: usize) -> Option<usize> {
+    let mut i = from;
+    while i + 3 < buf.len() {
+        let four = i + 4 <= buf.len() && buf[i..i + 4] == *ANNEX_B_START_CODE;
+        let three = buf[i..i + 3] == [0, 0, 1] && (i == 0 || buf[i - 1] != 0);
+        if (four || three) && is_probable_nalu_boundary(buf, i) {
+            return Some(i);
+        }
+        i += 1;
+    }
+    None
+}
+
 fn take_first_nalu(buf: &[u8]) -> Option<(Vec<u8>, usize)> {
     let start = find_annex_b_start(buf)?;
+    if !is_valid_nalu_start_at(buf, start) {
+        return None;
+    }
     let header_end = start + start_code_len_at(buf, start);
     if header_end > buf.len() {
         return None;
     }
-    let search_from = header_end;
-    let next = find_annex_b_start(&buf[search_from..]).map(|p| search_from + p);
-    let end = next.unwrap_or(buf.len());
+    let end = find_next_nalu_start(buf, header_end).unwrap_or(buf.len());
     if end <= start {
         return None;
     }
@@ -676,6 +845,25 @@ mod tests {
         let nalus = split_annex_b_nalus(&data);
         assert_eq!(nalus.len(), 2);
         assert_eq!(&nalus[0][..5], &[0, 0, 0, 1, 0x67]);
+    }
+
+    #[test]
+    fn annex_b_split_ignores_false_start_in_rbsp() {
+        let mut idr = vec![0u8, 0, 0, 1, 0x65, 0x88];
+        idr.extend(std::iter::repeat(0u8).take(32_760));
+        // Type-1-like false boundary (common inside large IDR RBSP).
+        idr.extend_from_slice(&[0, 0, 0, 1, 0x41, 0xaa]);
+        let nalus = split_annex_b_nalus(&idr);
+        assert_eq!(nalus.len(), 1, "false type-1 start inside IDR must not split NAL");
+    }
+
+    #[test]
+    fn coalesce_adjacent_idr_parts() {
+        let a = vec![0u8, 0, 0, 1, 0x65, 1, 2, 3];
+        let b = vec![0u8, 0, 0, 1, 0x65, 4, 5, 6];
+        let merged = coalesce_adjacent_vcl_nalus(vec![a, b]);
+        assert_eq!(merged.len(), 1);
+        assert_eq!(&merged[0][5..], &[1, 2, 3, 4, 5, 6]);
     }
 
     #[test]

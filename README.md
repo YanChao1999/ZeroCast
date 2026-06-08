@@ -17,6 +17,10 @@ Build the workspace:
 
 ```bash
 cargo build --workspace
+cargo test --workspace
+# FFmpeg roundtrip (426p + 720p IDR size); CI runs this automatically:
+cargo test -p zerocast_transport --test ffmpeg_integration
+# includes 10-frame cycle live-pipe roundtrip at 426p
 ```
 
 Run the desktop app (requires `ffmpeg` on PATH for H.264 streaming):
@@ -101,9 +105,10 @@ Roadmap (short)
 1. Desktop MVP — screen capture, H.264 encode, RTP streaming, rendering ✅
 2. **Phase 2a** — mDNS + same-PC discovery ✅ — [docs/PHASE-2A.md](docs/PHASE-2A.md)
 3. **Phase 1b** — encoder pipe + sender stats ✅ — [docs/PHASE-1B.md](docs/PHASE-1B.md)
-4. **Phase 1c (in progress)** — discover negotiation (`max_w`/`max_h` TXT) — [docs/PHASE-1C.md](docs/PHASE-1C.md), [docs/PHASE-QOS.md](docs/PHASE-QOS.md)
-5. Audio + A/V sync
-6. **Phase QoS** — adaptive ladder, HW encoders, fallback — [docs/PHASE-QOS.md](docs/PHASE-QOS.md)
-7. Android receiver, then sender
-8. iOS support (ReplayKit + VideoToolbox)
-9. **Embedded recv** — Linux ARM (Pi Zero W, Wi‑Fi) — [docs/PHASE-QOS.md](docs/PHASE-QOS.md#embedded-receivers-linux-arm--wifi)
+4. **Phase 1c** — discover negotiation ✅ — [docs/PHASE-1C.md](docs/PHASE-1C.md)
+5. **Phase QoS v1 foundation** — metrics hints, `class=embedded` (closed loop not done) — [docs/PHASE-QOS.md](docs/PHASE-QOS.md)
+6. Audio + A/V sync
+7. **Phase QoS closed loop** — hot reconfigure, RTCP/recv lag — [docs/PHASE-QOS.md](docs/PHASE-QOS.md)
+8. Android receiver, then sender
+9. iOS support (ReplayKit + VideoToolbox)
+10. **Embedded recv** — Linux ARM (Pi Zero W, Wi‑Fi) — [docs/PHASE-QOS.md](docs/PHASE-QOS.md#embedded-receivers-linux-arm--wifi)

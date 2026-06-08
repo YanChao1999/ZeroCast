@@ -1,6 +1,6 @@
 # Phase QoS — adaptive streaming
 
-Branch: TBD (`phase-qos/adaptive` after 1c media backends)
+Branch: `phase-qos/v1-foundation` (in progress)
 
 ## Goal
 
@@ -95,7 +95,7 @@ Pi Zero W recv (426×240 @ 15 capable)
 
 - [ ] Document Pi Zero W build (`armv6-unknown-linux-gnueabihf` / `aarch64`)
 - [ ] Headless `recv` service mode (no minifb) for edge deploy
-- [ ] mDNS TXT `class=embedded` + conservative defaults
+- [x] mDNS TXT `class=embedded` on `recv --profile low` (+ parse in discover)
 - [ ] Recv-side decode lag metric → RTCP or feedback channel for QoS
 - [ ] Optional: Pi 4+ V4L2 `h264_v4l2m2m` decode → dmabuf → **DRM/KMS HDMI**
 - [ ] Pi Zero W: minimal-copy NV12 → KMS scale at 426×240 (no full RGB24 path)
@@ -103,11 +103,26 @@ Pi Zero W recv (426×240 @ 15 capable)
 
 ### Phase QoS v1 — closed loop
 
-- [ ] `QosController` module (metrics window, hysteresis)
-- [ ] Downgrade on: encode_ms > budget, loss > threshold, recv lag, **recv decode overload**
-- [ ] Upgrade after stable window
-- [ ] Reconfigure encoder + capture scale without restart
+**Status: v1 foundation shipped (closed loop partial).** Discover negotiation + sender hot reconfigure on ladder change work; RTCP/recv lag feedback and recv-side resize are not done yet.
+
+| Done (v1 foundation) | Not done (v1 closed loop) |
+|----------------------|---------------------------|
+| `QosController` + hysteresis | RTCP loss / recv decode lag inputs |
+| `class=embedded` mDNS TXT | Dynamic mDNS re-advertise on profile change |
+| Negotiated session floor (no downgrade below discover caps) | |
+| Warmup windows; fps ratio ignored at session rung | |
+| Hot reconfigure capture + encoder on ladder change | |
+| Same-PC registry caps for direct `stream`; decoder RGB size guard (no red shear) | |
+
+- [x] `QosController` module (metrics window, hysteresis) in `zerocast_core`
+- [x] Downgrade hints on: low fps ratio, encode_ms over frame budget (sender stats window)
+- [x] Upgrade hints after stable window
+- [x] Session floor: no downgrade below negotiated recv caps
+- [x] Reconfigure encoder + capture scale without restart (`stream_loop` applies ladder rung)
+- [ ] Downgrade on: RTCP loss, recv decode lag
 - [ ] Dynamic mDNS re-advertise or control channel for profile change
+
+**CI:** `.github/workflows/ci.yml` — `cargo test --workspace`, `ffmpeg_integration` (720p IDR size + decode roundtrip), `zerocast_core` QoS unit tests.
 
 ### Phase QoS v2 — network polish
 

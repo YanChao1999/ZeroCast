@@ -91,6 +91,28 @@ impl StreamProfile {
     }
 }
 
+/// Receiver caps implied by `recv --profile <kind>` on a given display (session = profile size).
+pub fn receiver_capability_for_profile(
+    recv_kind: ProfileKind,
+    display_w: u32,
+    display_h: u32,
+    refresh_hz: u32,
+) -> ReceiverCapability {
+    let session = StreamProfile::from_kind(recv_kind, display_w, display_h, refresh_hz);
+    ReceiverCapability::from_stream_profile(session)
+}
+
+/// Negotiated `stream --profile <kind>` size against discover/registry recv caps.
+pub fn negotiate_for_receiver(
+    stream_kind: ProfileKind,
+    recv: ReceiverCapability,
+    display_w: u32,
+    display_h: u32,
+    refresh_hz: u32,
+) -> StreamProfile {
+    StreamProfile::from_kind(stream_kind, display_w, display_h, refresh_hz).capped_for_receiver(recv)
+}
+
 /// Receiver decode / display limits (from mDNS TXT or device defaults).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ReceiverCapability {
@@ -190,5 +212,44 @@ mod tests {
     fn parse_profile_kind() {
         assert_eq!(ProfileKind::parse("auto"), Some(ProfileKind::Auto));
         assert_eq!(ProfileKind::parse("medium"), Some(ProfileKind::Med));
+    }
+
+    /// 4×4 matrix: stream profile × recv profile (1920×1080 @ 60 Hz display).
+    /// Covers discover/`--profile` negotiation without ffmpeg or RTP.
+    #[test]
+    fn negotiation_matrix_stream_x_recv_profiles() {
+        use ProfileKind::{Auto, High, Low, Med};
+
+        const DW: u32 = 1920;
+        const DH: u32 = 1080;
+        const HZ: u32 = 60;
+
+        let cases: [(ProfileKind, ProfileKind, u32, u32, u32); 16] = [
+            (Low, Low, 426, 240, 15),
+            (Med, Low, 426, 240, 15),
+            (High, Low, 426, 240, 15),
+            (Auto, Low, 426, 240, 15),
+            (Low, Med, 426, 240, 15),
+            (Med, Med, 1280, 720, 30),
+            (High, Med, 1280, 720, 30),
+            (Auto, Med, 1280, 720, 30),
+            (Low, High, 426, 240, 15),
+            (Med, High, 1280, 720, 30),
+            (High, High, 1920, 1080, 60),
+            (Auto, High, 1920, 1080, 60),
+            (Low, Auto, 426, 240, 15),
+            (Med, Auto, 1280, 720, 30),
+            (High, Auto, 1920, 1080, 60),
+            (Auto, Auto, 1920, 1080, 60),
+        ];
+        for (stream, recv_kind, ew, eh, ef) in cases {
+            let recv = receiver_capability_for_profile(recv_kind, DW, DH, HZ);
+            let out = negotiate_for_receiver(stream, recv, DW, DH, HZ);
+            assert_eq!(
+                (out.width, out.height, out.fps),
+                (ew, eh, ef),
+                "stream {stream:?} × recv {recv_kind:?}"
+            );
+        }
     }
 }
