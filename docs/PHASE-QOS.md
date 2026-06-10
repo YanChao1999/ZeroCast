@@ -94,6 +94,7 @@ Pi Zero W recv (426×240 @ 15 capable)
 ### Embedded recv (Linux ARM)
 
 - [ ] Document Pi Zero W build (`armv6-unknown-linux-gnueabihf` / `aarch64`)
+- [x] **aarch64 QEMU recv lab** — [docs/QEMU-ARM-RECV.md](QEMU-ARM-RECV.md) + `scripts/qemu-arm-recv.sh`
 - [ ] Headless `recv` service mode (no minifb) for edge deploy
 - [x] mDNS TXT `class=embedded` on `recv --profile low` (+ parse in discover)
 - [ ] Recv-side decode lag metric → RTCP or feedback channel for QoS

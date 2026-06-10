@@ -7,7 +7,14 @@ license.workspace = true
 [dependencies]
 zerocast_core = { path = "../../crates/core" }
 zerocast_discovery = { path = "../../crates/discovery" }
-zerocast_platform = { path = "../../crates/platform" }
-zerocast_transport = { path = "../../crates/transport" }
+zerocast_platform = { path = "../../crates/platform", default-features = false }
+zerocast_transport = { path = "../../crates/transport", default-features = false }
+zerocast_protocol = { path = "../../crates/protocol" }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "net"] }
 anyhow = "1.0"
+
+[features]
+default = ["display", "capture", "audio"]
+display = ["zerocast_transport/display"]
+capture = ["zerocast_platform/capture", "zerocast_transport/capture"]
+audio = ["zerocast_transport/audio"]

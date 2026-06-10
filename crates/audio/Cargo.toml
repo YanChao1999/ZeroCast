@@ -1,0 +1,16 @@
+[package]
+name = "zerocast_audio"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+license.workspace = true
+description = "ZeroCast audio capture and Opus encode (ffmpeg libopus)"
+
+[dependencies]
+zerocast_protocol = { path = "../protocol" }
+anyhow = "1.0"
+cpal = { version = "0.15", optional = true }
+
+[features]
+default = []
+capture = ["cpal"]

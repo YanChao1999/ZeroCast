@@ -11,11 +11,13 @@ path = "src/lib.rs"
 
 [dependencies]
 zerocast_core = { path = "../core" }
-zerocast_platform = { path = "../platform" }
+zerocast_protocol = { path = "../protocol" }
+zerocast_audio = { path = "../audio", optional = true }
+zerocast_platform = { path = "../platform", default-features = false }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "time"] }
 anyhow = "1.0"
 bytes = "1"
-minifb = "0.28"
+minifb = { version = "0.28", optional = true }
 rtp = "0.2"
 webrtc-util = "0.2"
 ffmpeg-next = { version = "4.4", optional = true }
@@ -24,4 +26,8 @@ ffmpeg-next = { version = "4.4", optional = true }
 serial_test = "3"
 
 [features]
+default = ["display", "capture"]
+display = ["minifb"]
+capture = ["zerocast_platform/capture"]
+audio = ["zerocast_audio"]
 libav = ["ffmpeg-next"]

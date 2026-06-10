@@ -83,7 +83,7 @@ Recommended stack (summary)
 - Async runtime: tokio
 - QUIC: quinn
 - Device discovery: mdns-sd
-- Audio: cpal + opus
+- Audio: cpal + Opus (see [docs/spec/std/zerocast-protocol-v1.md](docs/spec/std/zerocast-protocol-v1.md))
 - Video codec: H.264 (start)
 
 Project layout
@@ -92,13 +92,17 @@ Project layout
 - `crates/platform` — cross-platform screen capture (`scrap` on desktop OSes)
 - `crates/transport` — RTP/RTCP, H.264 encode (ffmpeg CLI), streaming loop
 - `crates/core` — shared core (minimal today)
+- `crates/protocol` — on-the-wire constants ([spec](docs/spec/std/zerocast-protocol-v1.md))
+- `crates/audio` — PCM capture + Opus encode/decode
 - `crates/discovery` — mDNS-SD publish/browse (Phase 2a)
 
 Docs for agents and maintainers
+- **Protocol spec:** [docs/spec/std/zerocast-protocol-v1.md](docs/spec/std/zerocast-protocol-v1.md)
 - AI agent baseline: [AGENTS.md](AGENTS.md)
 - Agent skill and instructions: [SKILL.md](SKILL.md)
 - Copilot contributor guidance: [.github/copilot-instructions.md](.github/copilot-instructions.md)
 - Recommended dependency snippets: [DEPS.md](DEPS.md)
+- ARM QEMU embedded recv lab: [docs/QEMU-ARM-RECV.md](docs/QEMU-ARM-RECV.md)
 
 Roadmap (short)
 
@@ -107,7 +111,7 @@ Roadmap (short)
 3. **Phase 1b** — encoder pipe + sender stats ✅ — [docs/PHASE-1B.md](docs/PHASE-1B.md)
 4. **Phase 1c** — discover negotiation ✅ — [docs/PHASE-1C.md](docs/PHASE-1C.md)
 5. **Phase QoS v1 foundation** — metrics hints, `class=embedded` (closed loop not done) — [docs/PHASE-QOS.md](docs/PHASE-QOS.md)
-6. Audio + A/V sync
+6. **Phase Audio v0** — Opus RTP + spec ([docs/PHASE-AUDIO.md](docs/PHASE-AUDIO.md), [protocol v1.1](docs/spec/std/zerocast-protocol-v1.md))
 7. **Phase QoS closed loop** — hot reconfigure, RTCP/recv lag — [docs/PHASE-QOS.md](docs/PHASE-QOS.md)
 8. Android receiver, then sender
 9. iOS support (ReplayKit + VideoToolbox)

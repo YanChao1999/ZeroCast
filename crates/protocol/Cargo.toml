@@ -1,0 +1,10 @@
+[package]
+name = "zerocast_protocol"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+license.workspace = true
+description = "ZeroCast on-the-wire protocol constants (see docs/spec/std/zerocast-protocol-v1.md)"
+
+[dependencies]
+anyhow = "1.0"

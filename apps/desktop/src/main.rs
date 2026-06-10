@@ -162,6 +162,7 @@ async fn main() -> anyhow::Result<()> {
             let mut argv: Vec<String> = args.collect();
             let discover = take_flag(&mut argv, "--discover");
             let test_cycle = take_flag(&mut argv, "--test-cycle");
+            let with_audio = take_flag(&mut argv, "--audio");
             let max_frames: u64 = match require_option_arg(&mut argv, "--frames", "N")? {
                 Some(s) => s.parse().context("--frames must be a positive integer")?,
                 None => 0,
@@ -184,7 +185,7 @@ async fn main() -> anyhow::Result<()> {
 
             let (target, width, height, fps) = if discover {
                 let found = zerocast_discovery::browse_streams(
-                    zerocast_discovery::DEFAULT_BROWSE_TIMEOUT,
+                    zerocast_discovery::browse_timeout_from_env(),
                 )
                 .await?;
                 let ad = zerocast_discovery::pick_receiver(found)?;
@@ -271,6 +272,9 @@ async fn main() -> anyhow::Result<()> {
             if max_frames > 0 {
                 eprintln!("stream: will stop after {max_frames} frames");
             }
+            if with_audio {
+                eprintln!("stream: Opus audio enabled (RTP port = video port + 2)");
+            }
             println!(
                 "Streaming H.264 over RTP (ffmpeg CLI): {} -> {} ({}x{} @ {} fps{})",
                 local,
@@ -300,10 +304,22 @@ async fn main() -> anyhow::Result<()> {
                 max_frames,
                 Some(qos),
                 test_cycle,
+                with_audio,
             )
             .await?;
         }
         Some("recv") => {
+            #[cfg(not(feature = "display"))]
+            {
+                anyhow::bail!(
+                    "this binary was built without the `display` feature (headless recv only).\n  \
+                     use `recv-log`, or rebuild with `--features display` and aarch64 X11 libs,\n  \
+                     or build natively inside the ARM VM: cargo build -p zerocast_desktop --release"
+                );
+            }
+
+            #[cfg(feature = "display")]
+            {
             let mut argv: Vec<String> = args.collect();
             let no_mdns = take_flag(&mut argv, "--no-mdns");
             let profile_name =
@@ -366,12 +382,60 @@ async fn main() -> anyhow::Result<()> {
             );
             zerocast_transport::recv_with_display(&local, width, height).await?;
             drop(publisher);
+            }
         }
         Some("recv-log") => {
-            let local = args.next().expect("missing local arg (e.g. 0.0.0.0:5000)");
-            println!("Running receiver (log only): {}", local);
-            let r = zerocast_transport::Receiver::bind(&local).await?;
-            r.run().await?;
+            let mut argv: Vec<String> = args.collect();
+            let no_mdns = take_flag(&mut argv, "--no-mdns");
+            let with_audio = take_flag(&mut argv, "--audio");
+            let profile_name =
+                require_option_arg(&mut argv, "--profile", "low|med|high|auto")?;
+            let profile_kind = match profile_name.as_deref() {
+                None => Some(zerocast_core::ProfileKind::Low),
+                Some(name) => Some(parse_profile_kind(name)?),
+            };
+
+            let local = argv.first().cloned().ok_or_else(|| {
+                anyhow::anyhow!(
+                    "recv-log requires <local>\n  \
+                     e.g. recv-log 0.0.0.0:5000\n  \
+                     e.g. recv-log 0.0.0.0:5000 --profile low\n  \
+                     mDNS publish is on by default (use --no-mdns to disable)"
+                )
+            })?;
+            argv.remove(0);
+
+            let display = log_primary_display();
+            let (width, height, fps) = profile_dims(profile_kind.unwrap(), &display);
+
+            let publisher = if !no_mdns {
+                let port = zerocast_discovery::listen_port(&local)?;
+                let instance = zerocast_discovery::local_instance_name();
+                let device_class = match profile_kind {
+                    Some(zerocast_core::ProfileKind::Low) => Some("embedded"),
+                    _ => None,
+                };
+                Some(zerocast_discovery::StreamPublisher::register_with_class_and_audio(
+                    &instance, port, width, height, fps, device_class, with_audio,
+                )?)
+            } else {
+                None
+            };
+
+            println!("Running receiver (log only): {}{}", local, if with_audio { " + audio" } else { "" });
+            #[cfg(feature = "audio")]
+            {
+                zerocast_transport::recv_log_av(&local, with_audio).await?;
+            }
+            #[cfg(not(feature = "audio"))]
+            {
+                if with_audio {
+                    anyhow::bail!("this binary was built without the `audio` feature");
+                }
+                let r = zerocast_transport::Receiver::bind(&local).await?;
+                r.run().await?;
+            }
+            drop(publisher);
         }
         _ => {
             eprintln!(
@@ -381,10 +445,10 @@ async fn main() -> anyhow::Result<()> {
                  zerocast_desktop stream <local> <target> [width] [height] [fps]\n  \
                  zerocast_desktop stream <local> --discover [--profile low|med|high|auto]\n  \
                  zerocast_desktop stream <local> <target> --profile auto [--frames N] [--test-cycle]\n  \
-                 zerocast_desktop stream <local> <target> --profile low --frames 11 --test-cycle\n  \
+                 zerocast_desktop stream <local> <target> --profile low --frames 11 --test-cycle [--audio]\n  \
                  zerocast_desktop recv <local> <width> <height> [fps] [--no-mdns]\n  \
                  zerocast_desktop recv <local> --profile low|med|high|auto [--no-mdns]\n  \
-                 zerocast_desktop recv-log <local>\n  \
+                 zerocast_desktop recv-log <local> [--profile low|med|high|auto] [--no-mdns] [--audio]\n  \
                  zerocast_desktop --version\n\n\
                  Zero-config: start recv first (publishes via mDNS), then stream --discover.\n\n\
                  Requires `ffmpeg` on PATH for real H.264 (libx264). \

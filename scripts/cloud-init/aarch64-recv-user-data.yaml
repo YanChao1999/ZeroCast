@@ -1,0 +1,42 @@
+#cloud-config
+# Templated by scripts/qemu-arm-recv.sh — do not use directly.
+hostname: zerocast-recv
+manage_etc_hosts: true
+
+users:
+  - name: zerocast
+    gecos: ZeroCast ARM recv test
+    sudo: ALL=(ALL) NOPASSWD:ALL
+    shell: /bin/bash
+    groups: users, sudo
+    ssh_authorized_keys:
+      - __SSH_PUBKEY__
+
+package_update: false
+packages: []
+
+write_files:
+  - path: /etc/systemd/system/zerocast-recv-log.service
+    content: |
+      [Unit]
+      Description=ZeroCast recv-log (ARM QEMU smoke)
+      After=network-online.target
+      Wants=network-online.target
+
+      [Service]
+      Type=simple
+      User=zerocast
+      WorkingDirectory=/home/zerocast
+      ExecStart=/home/zerocast/zerocast_desktop recv-log 0.0.0.0:5000
+      Restart=on-failure
+
+      [Install]
+      WantedBy=multi-user.target
+
+runcmd:
+  - mkdir -p /home/zerocast/bin
+  - chown -R zerocast:zerocast /home/zerocast
+  - systemctl daemon-reload
+  - echo "zerocast arm recv cloud-init done" > /var/log/zerocast-cloud-init.done
+
+final_message: "ZeroCast ARM recv VM ready after $UPTIME seconds"

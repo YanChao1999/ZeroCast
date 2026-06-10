@@ -59,6 +59,14 @@ pub fn write_receiver(ad: &StreamAdvertisement) -> Result<()> {
     if let Some(class) = &ad.device_class {
         writeln!(f, "class={class}")?;
     }
+    if ad.audio {
+        writeln!(f, "audio=1")?;
+        if ad.audio_port > 0 {
+            writeln!(f, "a_port={}", ad.audio_port)?;
+        }
+        writeln!(f, "a_sr={}", ad.audio_sample_rate)?;
+        writeln!(f, "a_ch={}", ad.audio_channels)?;
+    }
     Ok(())
 }
 
@@ -111,6 +119,10 @@ fn parse_entry(path: &Path, text: &str) -> Option<StreamAdvertisement> {
     let mut max_height = 0u32;
     let mut max_fps = 0u32;
     let mut device_class = None;
+    let mut audio = false;
+    let mut audio_port = 0u16;
+    let mut audio_sample_rate = 0u32;
+    let mut audio_channels = 0u16;
 
     for line in text.lines() {
         let Some((k, v)) = line.split_once('=') else {
@@ -127,6 +139,10 @@ fn parse_entry(path: &Path, text: &str) -> Option<StreamAdvertisement> {
             "max_h" => max_height = v.trim().parse().unwrap_or(0),
             "max_fps" => max_fps = v.trim().parse().unwrap_or(0),
             "class" => device_class = Some(v.trim().to_string()),
+            "audio" => audio = v.trim() == "1",
+            "a_port" => audio_port = v.trim().parse().unwrap_or(0),
+            "a_sr" => audio_sample_rate = v.trim().parse().unwrap_or(0),
+            "a_ch" => audio_channels = v.trim().parse().unwrap_or(0),
             _ => {}
         }
     }
@@ -144,6 +160,18 @@ fn parse_entry(path: &Path, text: &str) -> Option<StreamAdvertisement> {
         max_height,
         max_fps,
         device_class,
+        audio,
+        audio_port,
+        audio_sample_rate: if audio_sample_rate > 0 {
+            audio_sample_rate
+        } else {
+            zerocast_protocol::audio::SAMPLE_RATE
+        },
+        audio_channels: if audio_channels > 0 {
+            audio_channels
+        } else {
+            zerocast_protocol::audio::CHANNELS
+        },
     })
 }
 

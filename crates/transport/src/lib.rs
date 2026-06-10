@@ -6,13 +6,18 @@ use rtp::packet::Packet as RtpPacket;
 // webrtc-util marshal/unmarshal traits used by the `rtp` crate
 use webrtc_util::marshal::{Marshal, Unmarshal};
 mod decoder;
+#[cfg(feature = "audio")]
+mod audio_rtp;
+#[cfg(feature = "display")]
 mod display;
 mod encoder;
 mod h264_rtp;
+#[cfg(feature = "display")]
 mod receiver_view;
 mod test_pattern;
 
 pub use decoder::decode_access_unit_rgb24;
+#[cfg(feature = "display")]
 pub use display::RgbFrame;
 pub use encoder::{
     encode_access_unit_oneshot, FfmpegCliEncoder, VideoEncoder, DEFAULT_FPS, DEFAULT_HEIGHT,
@@ -20,6 +25,8 @@ pub use encoder::{
 };
 pub use h264_rtp::nalus_to_annex_b;
 pub use test_pattern::{decoded_cycle_from_rgb, test_cycle_frame, CYCLE_COUNT};
+#[cfg(feature = "audio")]
+pub use audio_rtp::{recv_log_av, audio_stream_loop, AudioReceiver, AudioSender};
 
 /// Optional QoS context for `capture_encode_and_stream` (sender-side metrics).
 #[derive(Debug, Clone, Copy)]
@@ -32,6 +39,7 @@ pub struct StreamQosOpts {
 }
 
 /// Receive RTP, decode H.264, and show a minifb window (blocking UI thread).
+#[cfg(feature = "display")]
 pub async fn recv_with_display(local: &str, width: u32, height: u32) -> anyhow::Result<()> {
     let receiver = Receiver::bind(local).await?;
     receiver_view::run_with_display(receiver, width, height).await
@@ -390,7 +398,7 @@ pub async fn capture_encode_and_stream(
     fps: u32,
     max_frames: u64,
 ) -> anyhow::Result<()> {
-    capture_encode_and_stream_with_qos(local, target, width, height, fps, max_frames, None, false).await
+    capture_encode_and_stream_with_qos(local, target, width, height, fps, max_frames, None, false, false).await
 }
 
 pub async fn capture_encode_and_stream_with_qos(
@@ -402,6 +410,7 @@ pub async fn capture_encode_and_stream_with_qos(
     max_frames: u64,
     qos: Option<StreamQosOpts>,
     test_cycle: bool,
+    with_audio: bool,
 ) -> anyhow::Result<()> {
     // Screen + network setup before ffmpeg: a long gap after the first stdin writes
     // makes ffmpeg's pipe encoder stop producing output on Windows.
@@ -434,6 +443,7 @@ pub async fn capture_encode_and_stream_with_qos(
         Some(first_frame),
         qos,
         test_cycle,
+        with_audio,
     )
     .await
 }
@@ -459,6 +469,7 @@ pub async fn capture_encode_and_stream_with_encoder(
         None,
         None,
         None,
+        false,
         false,
     )
     .await
@@ -506,8 +517,25 @@ async fn stream_loop(
     first_frame: Option<Vec<u8>>,
     qos: Option<StreamQosOpts>,
     test_cycle: bool,
+    with_audio: bool,
 ) -> anyhow::Result<()> {
     use zerocast_core::{QosAction, QosController, StreamMetricsSample, StreamProfile};
+
+    #[cfg(feature = "audio")]
+    if with_audio {
+        let audio_local = zerocast_protocol::audio_bind_from_video(_local, None)?;
+        let audio_target = zerocast_protocol::audio_target_from_video(_target, None)?;
+        let max = max_frames;
+        tokio::spawn(async move {
+            if let Err(e) = audio_rtp::audio_stream_loop(&audio_local, &audio_target, max).await {
+                eprintln!("audio stream error: {e:#}");
+            }
+        });
+    }
+    #[cfg(not(feature = "audio"))]
+    if with_audio {
+        eprintln!("audio: disabled (build without `audio` feature)");
+    }
 
     let mut qos_controller = qos.map(|o| {
         let session = StreamProfile {

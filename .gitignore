@@ -19,6 +19,9 @@ cobertura.xml
 *.profraw
 default_*.profraw
 
+# ARM QEMU lab (scripts/qemu-arm-recv.sh)
+.qemu-arm/
+
 # RustRover
 #  JetBrains specific template is maintained in a separate JetBrains.gitignore that can
 #  be found at https://github.com/github/gitignore/blob/main/Global/JetBrains.gitignore

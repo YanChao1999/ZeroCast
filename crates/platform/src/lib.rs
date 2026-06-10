@@ -4,7 +4,7 @@
 
 mod stub;
 
-#[cfg(any(windows, target_os = "macos", target_os = "linux"))]
+#[cfg(all(feature = "capture", any(windows, target_os = "macos", target_os = "linux")))]
 mod scrap_capture;
 
 mod display;
@@ -21,7 +21,7 @@ pub struct ScreenCapture {
 }
 
 enum CaptureInner {
-    #[cfg(any(windows, target_os = "macos", target_os = "linux"))]
+    #[cfg(all(feature = "capture", any(windows, target_os = "macos", target_os = "linux")))]
     Scrap(scrap_capture::ScrapCapturer),
     Stub(stub::StubCapturer),
 }
@@ -31,7 +31,7 @@ impl ScreenCapture {
     pub fn open(width: u32, height: u32) -> Result<Self> {
         assert!(width > 0 && height > 0, "width and height must be positive");
 
-        #[cfg(any(windows, target_os = "macos", target_os = "linux"))]
+        #[cfg(all(feature = "capture", any(windows, target_os = "macos", target_os = "linux")))]
         {
             match scrap_capture::ScrapCapturer::open(width, height) {
                 Ok(scrap) => {
@@ -75,7 +75,7 @@ impl ScreenCapture {
             bail!("width and height must be positive");
         }
         match &mut self.inner {
-            #[cfg(any(windows, target_os = "macos", target_os = "linux"))]
+            #[cfg(all(feature = "capture", any(windows, target_os = "macos", target_os = "linux")))]
             CaptureInner::Scrap(s) => {
                 s.set_output_size(width, height);
             }
@@ -90,7 +90,7 @@ impl ScreenCapture {
     /// One RGB24 frame (`width * height * 3` bytes).
     pub fn capture_frame(&mut self) -> Result<Vec<u8>> {
         match &mut self.inner {
-            #[cfg(any(windows, target_os = "macos", target_os = "linux"))]
+            #[cfg(all(feature = "capture", any(windows, target_os = "macos", target_os = "linux")))]
             CaptureInner::Scrap(s) => s.capture_frame(),
             CaptureInner::Stub(s) => s.capture_frame(),
         }

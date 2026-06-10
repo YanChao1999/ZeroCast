@@ -16,7 +16,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - name: Install system deps (X11 for scrap/minifb, ffmpeg)
+      - name: Install system deps (X11 for scrap/minifb, ffmpeg, libopus)
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
@@ -26,6 +26,8 @@ jobs:
         run: ffmpeg -version | head -n 1
       - name: Unit tests (workspace, lib only)
         run: cargo test --workspace --lib
+      - name: Opus encoder smoke (ffmpeg)
+        run: cargo test -p zerocast_audio encode_sine_frame -- --nocapture
       - name: FFmpeg integration (426p + 720p roundtrip)
         run: cargo test -p zerocast_transport --test ffmpeg_integration
       - name: QoS controller tests
@@ -132,3 +134,19 @@ jobs:
           EOF
       - name: cargo check (core, platform)
         run: cargo check -p zerocast_core -p zerocast_platform --target aarch64-linux-android
+
+  check-aarch64-linux:
+    name: check (aarch64 linux recv)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Install cross linker
+        run: sudo apt-get update && sudo apt-get install -y gcc-aarch64-linux-gnu
+      - name: Add aarch64 Linux target
+        run: rustup target add aarch64-unknown-linux-gnu
+      - name: cargo check (desktop recv binary)
+        env:
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
+        run: cargo check -p zerocast_desktop --target aarch64-unknown-linux-gnu --no-default-features

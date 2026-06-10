@@ -1,7 +1,6 @@
 //! mDNS-SD discovery for ZeroCast streams (Phase 2a).
 //!
-//! Service type: `_zerocast._udp.local.`
-//! TXT keys: `w`, `h`, `fps`, `max_w`, `max_h`, `max_fps`, `class`, `v` (protocol version)
+//! Service type and TXT keys: see `docs/spec/std/zerocast-protocol-v1.md`.
 
 mod browse;
 mod daemon;
@@ -19,11 +18,21 @@ use std::time::Duration;
 /// How long `stream --discover` waits for receivers on the LAN.
 pub const DEFAULT_BROWSE_TIMEOUT: Duration = Duration::from_secs(5);
 
+/// `ZERO_CAST_BROWSE_TIMEOUT` (seconds) overrides [DEFAULT_BROWSE_TIMEOUT].
+pub fn browse_timeout_from_env() -> Duration {
+    std::env::var("ZERO_CAST_BROWSE_TIMEOUT")
+        .ok()
+        .and_then(|s| s.parse::<u64>().ok())
+        .filter(|&secs| secs > 0)
+        .map(Duration::from_secs)
+        .unwrap_or(DEFAULT_BROWSE_TIMEOUT)
+}
+
 /// mDNS service type (must end with `._udp.local.`).
-pub const SERVICE_TYPE: &str = "_zerocast._udp.local.";
+pub const SERVICE_TYPE: &str = zerocast_protocol::mdns::SERVICE_TYPE;
 
 /// TXT property: protocol / API version.
-pub const TXT_VERSION: &str = "v";
+pub const TXT_VERSION: &str = zerocast_protocol::mdns::TXT_V;
 
 /// Fallback when session `fps` is unset (matches transport default).
 pub const DEFAULT_STREAM_FPS: u32 = 15;
@@ -39,6 +48,10 @@ pub struct TxtStreamProps {
     pub max_fps: u32,
     /// Optional QoS hint, e.g. `embedded` for Pi-class receivers.
     pub device_class: Option<String>,
+    pub audio: bool,
+    pub audio_port: u16,
+    pub audio_sample_rate: u32,
+    pub audio_channels: u16,
 }
 
 /// Advertised stream metadata (from TXT + SRV).
@@ -56,6 +69,10 @@ pub struct StreamAdvertisement {
     pub max_height: u32,
     pub max_fps: u32,
     pub device_class: Option<String>,
+    pub audio: bool,
+    pub audio_port: u16,
+    pub audio_sample_rate: u32,
+    pub audio_channels: u16,
 }
 
 impl StreamAdvertisement {
@@ -119,6 +136,19 @@ impl StreamAdvertisement {
             || (self.max_height > 0 && self.max_height != self.height)
             || (self.max_fps > 0 && self.max_fps != self.fps)
     }
+
+    pub fn audio_rtp_port(&self) -> u16 {
+        if self.audio_port > 0 {
+            self.audio_port
+        } else {
+            zerocast_protocol::audio_port_from_video(self.port)
+                .unwrap_or(zerocast_protocol::ports::AUDIO_RTP_DEFAULT)
+        }
+    }
+
+    pub fn audio_target_addr(&self) -> String {
+        format!("{}:{}", self.host, self.audio_rtp_port())
+    }
 }
 
 /// Parse TXT properties from mdns-sd into stream dimensions and recv caps.
@@ -133,6 +163,10 @@ pub fn parse_txt_properties(properties: &[(String, String)]) -> TxtStreamProps {
             "max_h" => props.max_height = v.parse().unwrap_or(0),
             "max_fps" => props.max_fps = v.parse().unwrap_or(0),
             "class" => props.device_class = Some(v.clone()),
+            "audio" => props.audio = v == "1" || v.eq_ignore_ascii_case("true"),
+            "a_port" => props.audio_port = v.parse().unwrap_or(0),
+            "a_sr" => props.audio_sample_rate = v.parse().unwrap_or(0),
+            "a_ch" => props.audio_channels = v.parse().unwrap_or(0),
             _ => {}
         }
     }
@@ -156,6 +190,18 @@ pub fn advertisement_from_txt(
         max_height: txt.max_height,
         max_fps: txt.max_fps,
         device_class: txt.device_class,
+        audio: txt.audio,
+        audio_port: txt.audio_port,
+        audio_sample_rate: if txt.audio_sample_rate > 0 {
+            txt.audio_sample_rate
+        } else {
+            zerocast_protocol::audio::SAMPLE_RATE
+        },
+        audio_channels: if txt.audio_channels > 0 {
+            txt.audio_channels
+        } else {
+            zerocast_protocol::audio::CHANNELS
+        },
     }
 }
 
@@ -177,6 +223,10 @@ mod tests {
             max_height: 240,
             max_fps: 15,
             device_class: None,
+            audio: false,
+            audio_port: 0,
+            audio_sample_rate: zerocast_protocol::audio::SAMPLE_RATE,
+            audio_channels: zerocast_protocol::audio::CHANNELS,
         };
         local_registry::write_receiver(&ad).expect("write");
         let found = local_registry::read_local_receivers();
@@ -235,6 +285,10 @@ mod tests {
             max_height: 240,
             max_fps: 15,
             device_class: Some("embedded".into()),
+            audio: false,
+            audio_port: 0,
+            audio_sample_rate: zerocast_protocol::audio::SAMPLE_RATE,
+            audio_channels: zerocast_protocol::audio::CHANNELS,
         };
         local_registry::write_receiver(&ad).expect("write");
         let found = local_registry::receiver_for_target("127.0.0.1:5010");
@@ -255,6 +309,10 @@ mod tests {
             max_height: 0,
             max_fps: 0,
             device_class: None,
+            audio: false,
+            audio_port: 0,
+            audio_sample_rate: zerocast_protocol::audio::SAMPLE_RATE,
+            audio_channels: zerocast_protocol::audio::CHANNELS,
         };
         assert_eq!(ad.effective_max_width(), 426);
         assert_eq!(ad.effective_max_fps(ad.session_fps_or(30)), 15);
