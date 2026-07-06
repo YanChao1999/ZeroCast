@@ -1,7 +1,7 @@
 use crate::daemon::create_daemon;
 use crate::local_registry;
 use crate::net::{local_ip_addrs, primary_ipv4};
-use crate::{StreamAdvertisement, SERVICE_TYPE, TXT_VERSION};
+use crate::{StreamAdvertisement, SERVICE_TYPE};
 use anyhow::{Context, Result};
 use mdns_sd::{ServiceDaemon, ServiceInfo};
 use std::sync::atomic::{AtomicBool, Ordering};

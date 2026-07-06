@@ -49,7 +49,11 @@ export PKG_CONFIG_PATH="${PKG_CONFIG_PATH:-/usr/lib/aarch64-linux-gnu/pkgconfig}
 # build natively inside the VM: cargo build -p zerocast_desktop --release
 
 echo "==> adding rust target aarch64-unknown-linux-gnu (if needed)"
-rustup target add aarch64-unknown-linux-gnu
+if command -v rustup >/dev/null 2>&1; then
+  rustup target add aarch64-unknown-linux-gnu
+else
+  echo "    (rustup not found — assuming target is already installed via apt/rustc)"
+fi
 
 echo "==> cross-building zerocast_desktop (release, headless — no minifb/xcb)"
 cargo build -p zerocast_desktop --release --target aarch64-unknown-linux-gnu --no-default-features

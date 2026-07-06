@@ -6,6 +6,7 @@ use zerocast_protocol::audio::{CHANNELS, SAMPLE_RATE};
 use crate::source::PcmFrame;
 
 /// Opus decoder for 20 ms frames via ffmpeg `libopus` (spec §5).
+/// Expects Ogg Opus pages matching the v1.1 ffmpeg encoder output.
 pub struct OpusDecoder {
     channels: u16,
     sample_rate: u32,

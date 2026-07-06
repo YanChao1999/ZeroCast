@@ -76,7 +76,7 @@ ensure_ssh_key() {
 }
 
 ssh_opts() {
-  echo -o StrictHostKeyChecking=no -o UserKnownHostsFile="$QEMU_DIR/known_hosts" -o ConnectTimeout=5
+  echo -o StrictHostKeyChecking=no -o UserKnownHostsFile="$QEMU_DIR/known_hosts"
 }
 
 # Cached address from vm-wait; invalid when switching user ↔ bridge.
@@ -125,7 +125,7 @@ vm_ssh() {
   local host port
   host="$(ssh_target)"
   port="$(ssh_port)"
-  ssh -i "$SSH_KEY" -p "$port" $(ssh_opts) "${VM_USER}@${host}" "$@"
+  ssh -i "$SSH_KEY" -p "$port" -o ConnectTimeout=5 $(ssh_opts) "${VM_USER}@${host}" "$@"
 }
 
 vm_scp() {
@@ -133,7 +133,7 @@ vm_scp() {
   local host port
   host="$(ssh_target)"
   port="$(ssh_port)"
-  scp -i "$SSH_KEY" -P "$port" $(ssh_opts) "$@"
+  scp -i "$SSH_KEY" -P "$port" -o ConnectTimeout=5 $(ssh_opts) "$@"
 }
 
 network_mode() {
@@ -172,7 +172,7 @@ bridge_try_ssh() {
     [[ -z "$host" || "$host" == "192.168.122.1" ]] && continue
     [[ " ${seen[*]} " == *" $host "* ]] && continue
     seen+=("$host")
-    if ssh -i "$SSH_KEY" -p "$port" -o ConnectTimeout="$timeout" -o BatchMode=yes $(ssh_opts) \
+    if ssh -i "$SSH_KEY" -p "$port" -o BatchMode=yes $(ssh_opts) -o ConnectTimeout="$timeout" \
       "${VM_USER}@${host}" true 2>/dev/null; then
       echo "$host" >"$QEMU_DIR/vm.ip"
       echo "SSH ready (${VM_USER}@${host}:${port})"
@@ -327,7 +327,7 @@ vm_wait() {
     host="127.0.0.1"
     echo "waiting for SSH (${VM_USER}@${host}:${port}) ..."
     for i in $(seq 1 120); do
-      if ssh -i "$SSH_KEY" -p "$port" -o ConnectTimeout=10 $(ssh_opts) "${VM_USER}@${host}" true 2>/dev/null; then
+      if ssh -i "$SSH_KEY" -p "$port" $(ssh_opts) -o ConnectTimeout=10 "${VM_USER}@${host}" true 2>/dev/null; then
         echo "$host" >"$QEMU_DIR/vm.ip"
         echo "SSH ready (${VM_USER}@${host}:${port})"
         return 0

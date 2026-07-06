@@ -127,7 +127,7 @@ RTCP Sender Reports (SR) SHOULD be sent ~1 Hz on port `P+1` for future A/V sync 
 | SSRC | **Distinct** from video SSRC |
 | Timestamp | Increment **960** per 20 ms frame (48 kHz clock) |
 
-Each RTP packet payload is one **Opus packet** (not RFC 6716 framing — raw Opus toc + frames as produced by libopus).
+Each RTP packet payload is one **Opus audio frame**. v1.1 reference implementation (ffmpeg `libopus`) muxes each 20 ms frame as a **single-page Ogg Opus blob** (`-f opus`); receivers decode with `-f ogg`. Raw Opus packets (RFC 6716 style, no Ogg) are the v1.2 target for lower overhead.
 
 - **Marker bit:** MAY be set on talk-spurt boundaries; v1 senders MAY leave unset.
 - **RTCP:** SR on port `A+1` ~1 Hz (same NTP mapping as video).
@@ -136,9 +136,9 @@ Each RTP packet payload is one **Opus packet** (not RFC 6716 framing — raw Opu
 
 Senders MAY emit a synthetic PCM source (e.g. sine tone) encoded as Opus for transport testing.
 
-### 5.2 Playback (future)
+### 5.2 Playback (v1.1 optional)
 
-Receivers decode Opus and play via cpal/ALSA/PulseAudio. v1.1 implementation logs RTP byte counts only (`recv-log --audio`).
+Receivers MAY decode Opus and play via cpal/ALSA/PulseAudio when built with the `audio-io` feature (`recv-log --audio --audio-play`, `recv --audio-play`). Without playback, `recv-log --audio` logs RTP byte counts only.
 
 ---
 

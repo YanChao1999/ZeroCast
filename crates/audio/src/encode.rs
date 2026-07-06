@@ -6,6 +6,7 @@ use zerocast_protocol::audio::{CHANNELS, SAMPLE_RATE};
 use crate::source::PcmFrame;
 
 /// Opus encoder for 20 ms frames via ffmpeg `libopus` (spec §5).
+/// MVP spawns ffmpeg per frame; a persistent pipe encoder is planned for v1.2.
 pub struct OpusEncoder {
     channels: u16,
     sample_rate: u32,

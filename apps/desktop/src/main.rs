@@ -351,8 +351,11 @@ async fn main() -> anyhow::Result<()> {
             {
             let mut argv: Vec<String> = args.collect();
             let no_mdns = take_flag(&mut argv, "--no-mdns");
-            let with_audio = take_flag(&mut argv, "--audio");
+            let mut with_audio = take_flag(&mut argv, "--audio");
             let audio_playback = take_flag(&mut argv, "--audio-play");
+            if audio_playback {
+                with_audio = true;
+            }
             let profile_name =
                 require_option_arg(&mut argv, "--profile", "low|med|high|auto")?;
             let profile_kind = match profile_name.as_deref() {
@@ -444,8 +447,11 @@ async fn main() -> anyhow::Result<()> {
         Some("recv-log") => {
             let mut argv: Vec<String> = args.collect();
             let no_mdns = take_flag(&mut argv, "--no-mdns");
-            let with_audio = take_flag(&mut argv, "--audio");
+            let mut with_audio = take_flag(&mut argv, "--audio");
             let audio_playback = take_flag(&mut argv, "--audio-play");
+            if audio_playback {
+                with_audio = true;
+            }
             let profile_name =
                 require_option_arg(&mut argv, "--profile", "low|med|high|auto")?;
             let profile_kind = match profile_name.as_deref() {

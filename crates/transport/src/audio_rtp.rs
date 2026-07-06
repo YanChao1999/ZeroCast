@@ -7,8 +7,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use anyhow::Context;
 
 use rtp::packet::Packet as RtpPacket;
-use webrtc_util::marshal::Marshal;
-use webrtc_util::Unmarshal;
+use webrtc_util::marshal::{Marshal, Unmarshal};
 use zerocast_protocol::rtp::PT_OPUS;
 
 use crate::AvSyncState;

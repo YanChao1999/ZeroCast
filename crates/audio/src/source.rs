@@ -129,9 +129,20 @@ pub mod cpal_capture {
                 {
                     let mut buf = self.pending.lock().unwrap();
                     if buf.len() >= need {
-                        let samples: Vec<i16> = buf.drain(..need).collect();
+                        let raw: Vec<i16> = buf.drain(..need).collect();
+                        if self.channels == 1 {
+                            let mut stereo = Vec::with_capacity(raw.len() * 2);
+                            for s in raw {
+                                stereo.push(s);
+                                stereo.push(s);
+                            }
+                            return Ok(PcmFrame {
+                                samples: stereo,
+                                channels: 2,
+                            });
+                        }
                         return Ok(PcmFrame {
-                            samples,
+                            samples: raw,
                             channels: self.channels,
                         });
                     }
