@@ -170,6 +170,8 @@ Future TXT keys: `tier`, `out=drm` (see [PHASE-QOS.md](../../PHASE-QOS.md)).
 v1 is **trusted LAN** only: no encryption, no authentication.  
 Do not expose RTP ports to the public Internet without a future DTLS/SRTP layer.
 
+**v2 (planned):** optional SRTP + QUIC control with **out-of-band PIN pairing** — see [zerocast-protocol-v2.md](zerocast-protocol-v2.md) and [PHASE-SECURITY.md](../../PHASE-SECURITY.md).
+
 ---
 
 ## 9. Changelog
