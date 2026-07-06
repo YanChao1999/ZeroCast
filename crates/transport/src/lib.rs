@@ -93,7 +93,8 @@ pub async fn recv_with_display_av(
     if with_audio {
         anyhow::bail!("this binary was built without the `audio` feature");
     }
-    recv_with_display(local, width, height).await
+    let receiver = Receiver::bind(local).await?;
+    receiver_view::run_with_display(receiver, width, height, None).await
 }
 
 /// Max RTP payload before UDP fragmentation on typical LAN MTU.
@@ -578,15 +579,15 @@ async fn stream_loop(
     qos: Option<StreamQosOpts>,
     test_cycle: bool,
     with_audio: bool,
-    use_test_tone: bool,
-    audio_target_override: Option<&str>,
+    _use_test_tone: bool,
+    _audio_target_override: Option<&str>,
 ) -> anyhow::Result<()> {
     use zerocast_core::{QosAction, QosController, StreamMetricsSample, StreamProfile};
 
     #[cfg(feature = "audio")]
     if with_audio {
         let audio_local = "0.0.0.0:0";
-        let audio_port_override = audio_target_override.as_ref().and_then(|s| {
+        let audio_port_override = _audio_target_override.as_ref().and_then(|s| {
             s.parse::<SocketAddr>()
                 .ok()
                 .map(|a| a.port())
@@ -596,7 +597,7 @@ async fn stream_loop(
             zerocast_protocol::audio_target_from_video(_target, audio_port_override)?;
         eprintln!("audio: sender {audio_local} -> {audio_target}");
         let max = max_frames;
-        let use_tone = use_test_tone;
+        let use_tone = _use_test_tone;
         tokio::spawn(async move {
             if let Err(e) =
                 audio_rtp::audio_stream_loop(audio_local, &audio_target, max, use_tone).await
