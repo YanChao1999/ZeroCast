@@ -1,6 +1,6 @@
 # Phase Audio v0/v1 — Opus RTP transport
 
-Branch: `cursor/phase-audio-v1-playback`
+Branch: `main` (v1.1 merged); v1.2 in `phase-audio/v1.2-persistent-sync`
 
 ## Goal
 
@@ -66,6 +66,14 @@ Forward UDP 5002/5003 in user-net mode; bridged `virbr0` passes audio like video
 
 ## Next (v1.2)
 
-- RTCP-based A/V sync + recv playout buffer
-- Resample non–48 kHz cpal devices
-- Require TXT `audio=1` when sender uses `--audio --discover`
+Branch: `phase-audio/v1.2-persistent-sync`
+
+| Item | Status |
+|------|--------|
+| Persistent Opus encode/decode (`opus-rs`, raw RTP) | Done |
+| ffmpeg Ogg fallback (`ffmpeg-opus` feature) | Done |
+| Audio RTCP SR receive (port A+1) | Done |
+| RTCP cross-correlation skew logging | Done |
+| Recv playout buffer (60 ms, RTP-scheduled) | Done (`audio-playback`) |
+| Require TXT `audio=1` when sender uses `--audio --discover` | TODO |
+| cpal resample non–48 kHz devices | TODO |

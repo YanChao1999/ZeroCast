@@ -127,7 +127,7 @@ RTCP Sender Reports (SR) SHOULD be sent ~1 Hz on port `P+1` for future A/V sync 
 | SSRC | **Distinct** from video SSRC |
 | Timestamp | Increment **960** per 20 ms frame (48 kHz clock) |
 
-Each RTP packet payload is one **Opus audio frame**. v1.1 reference implementation (ffmpeg `libopus`) muxes each 20 ms frame as a **single-page Ogg Opus blob** (`-f opus`); receivers decode with `-f ogg`. Raw Opus packets (RFC 6716 style, no Ogg) are the v1.2 target for lower overhead.
+Each RTP packet payload is one **Opus audio frame**. v1.2 reference implementation uses **raw Opus packets** (RFC 6716) via `opus-rs`. v1.1 senders MAY use **single-page Ogg Opus** blobs (`-f opus`); receivers with `ffmpeg-opus` decode those for interop.
 
 - **Marker bit:** MAY be set on talk-spurt boundaries; v1 senders MAY leave unset.
 - **RTCP:** SR on port `A+1` ~1 Hz (same NTP mapping as video).
@@ -152,7 +152,7 @@ Shared **session origin:** wall-clock `Instant` at sender when both streams star
 | Audio | Sample count since origin; RTP ts = `(samples * 48000) / sample_rate` |
 
 **v1.1:** log skew between video frame index time and audio sample time.  
-**v1.2 (planned):** RTCP SR cross-correlation + small recv playout buffer.
+**v1.2:** RTCP SR cross-correlation on video (port P+1) and audio (port A+1); recv playout buffer (~60 ms) schedules PCM by RTP timestamp; logs `rtcp_skew_ms` when both SR anchors are present.
 
 ---
 
@@ -178,6 +178,7 @@ Do not expose RTP ports to the public Internet without a future DTLS/SRTP layer.
 |---------|--------|
 | **1.0** | mDNS, H.264 video RTP/RTCP, profiles, negotiation |
 | **1.1** | Opus audio RTP/RTCP, TXT `audio`, `a_port`, `a_sr`, `a_ch` (draft) |
+| **1.2** | Raw Opus RTP, `opus-rs` codec, RTCP A/V sync, playout buffer |
 
 ---
 

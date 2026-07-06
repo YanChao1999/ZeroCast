@@ -2,13 +2,20 @@
 
 mod decode;
 mod encode;
+mod native;
 mod source;
+
+#[cfg(feature = "ffmpeg-opus")]
+mod decode_ffmpeg;
+#[cfg(feature = "ffmpeg-opus")]
+mod encode_ffmpeg;
 
 #[cfg(feature = "playback")]
 pub mod playback;
 
 pub use decode::OpusDecoder;
 pub use encode::OpusEncoder;
+pub use native::{is_ogg_opus, NativeOpusDecoder, NativeOpusEncoder};
 pub use source::{PcmFrame, SineSource, TestToneSource};
 
 #[cfg(feature = "capture")]
