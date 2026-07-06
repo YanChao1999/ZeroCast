@@ -58,6 +58,7 @@ pub async fn run_with_display(
     receiver: Receiver,
     expect_width: u32,
     expect_height: u32,
+    sync: Option<std::sync::Arc<crate::AvSyncState>>,
 ) -> Result<()> {
     let (frame_tx, frame_rx) = mpsc::sync_channel::<RgbFrame>(2);
     let (decode_tx, decode_rx) = mpsc::channel::<DecodeJob>();
@@ -67,10 +68,14 @@ pub async fn run_with_display(
 
     let mut frames_queued = 0u64;
     let decode_tx_rtp = decode_tx.clone();
+    let sync = sync;
 
     let rtp_handle = tokio::spawn(async move {
         receiver
             .run_frame_delivery(move |_ssrc, _rtp_ts, annex_b| {
+                if let Some(s) = &sync {
+                    s.on_video_frame();
+                }
                 let job = DecodeJob {
                     annex_b,
                     width: expect_width,

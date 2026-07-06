@@ -30,4 +30,10 @@ default = ["display", "capture"]
 display = ["minifb"]
 capture = ["zerocast_platform/capture"]
 audio = ["zerocast_audio"]
+audio-capture = ["audio", "zerocast_audio/capture", "dep:cpal"]
+audio-playback = ["audio", "zerocast_audio/playback", "dep:cpal"]
 libav = ["ffmpeg-next"]
+
+[dependencies.cpal]
+version = "0.15"
+optional = true

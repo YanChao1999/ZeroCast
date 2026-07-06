@@ -1,4 +1,6 @@
-use anyhow::{Context, Result};
+use anyhow::Result;
+#[cfg(feature = "capture")]
+use anyhow::Context;
 use zerocast_protocol::audio::{CHANNELS, SAMPLE_RATE};
 
 use crate::FRAME_SAMPLES;

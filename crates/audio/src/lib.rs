@@ -1,10 +1,18 @@
 //! PCM sources and Opus codec for ZeroCast audio RTP (spec §5).
 
+mod decode;
 mod encode;
 mod source;
 
+#[cfg(feature = "playback")]
+pub mod playback;
+
+pub use decode::OpusDecoder;
 pub use encode::OpusEncoder;
 pub use source::{PcmFrame, SineSource, TestToneSource};
+
+#[cfg(feature = "capture")]
+pub use source::cpal_capture::CpalMicSource;
 
 use zerocast_protocol::audio::{CHANNELS, SAMPLE_RATE};
 use zerocast_protocol::rtp::AUDIO_SAMPLES_PER_FRAME;

@@ -18,3 +18,9 @@ default = ["display", "capture", "audio"]
 display = ["zerocast_transport/display"]
 capture = ["zerocast_platform/capture", "zerocast_transport/capture"]
 audio = ["zerocast_transport/audio"]
+# Mic capture + speaker playback (requires libasound2-dev on Linux).
+audio-io = [
+    "audio",
+    "zerocast_transport/audio-capture",
+    "zerocast_transport/audio-playback",
+]

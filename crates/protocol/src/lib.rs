@@ -78,7 +78,12 @@ pub fn audio_bind_from_video(video_bind: &str, audio_port_override: Option<u16>)
         .or_else(|_| format!("0.0.0.0:{video_bind}").parse())
         .with_context(|| format!("invalid video bind '{video_bind}'"))?;
     let audio_port = audio_port_override.unwrap_or_else(|| {
-        audio_port_from_video(addr.port()).unwrap_or(ports::AUDIO_RTP_DEFAULT)
+        if addr.port() == 0 {
+            // Match ephemeral video bind (`0.0.0.0:0`); avoid port 2 (0 + 2).
+            0
+        } else {
+            audio_port_from_video(addr.port()).unwrap_or(ports::AUDIO_RTP_DEFAULT)
+        }
     });
     Ok(format!("{}:{audio_port}", addr.ip()))
 }
@@ -92,6 +97,14 @@ mod tests {
         assert_eq!(rtcp_port(5000), Some(5001));
         assert_eq!(audio_port_from_video(5000), Some(5002));
         assert_eq!(rtcp_port(5002), Some(5003));
+    }
+
+    #[test]
+    fn audio_bind_ephemeral_video() {
+        assert_eq!(
+            audio_bind_from_video("0.0.0.0:0", None).unwrap(),
+            "0.0.0.0:0"
+        );
     }
 
     #[test]

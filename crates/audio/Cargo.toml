@@ -13,4 +13,5 @@ cpal = { version = "0.15", optional = true }
 
 [features]
 default = []
-capture = ["cpal"]
+capture = ["dep:cpal"]
+playback = ["dep:cpal"]

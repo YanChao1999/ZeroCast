@@ -5,6 +5,7 @@ use std::collections::{HashMap, BTreeMap};
 use rtp::packet::Packet as RtpPacket;
 // webrtc-util marshal/unmarshal traits used by the `rtp` crate
 use webrtc_util::marshal::{Marshal, Unmarshal};
+mod av_sync;
 mod decoder;
 #[cfg(feature = "audio")]
 mod audio_rtp;
@@ -24,9 +25,10 @@ pub use encoder::{
     DEFAULT_WIDTH,
 };
 pub use h264_rtp::nalus_to_annex_b;
+pub use av_sync::AvSyncState;
 pub use test_pattern::{decoded_cycle_from_rgb, test_cycle_frame, CYCLE_COUNT};
 #[cfg(feature = "audio")]
-pub use audio_rtp::{recv_log_av, audio_stream_loop, AudioReceiver, AudioSender};
+pub use audio_rtp::{recv_log_av, audio_stream_loop, AudioReceiver, AudioSender, RecvAvOpts};
 
 /// Optional QoS context for `capture_encode_and_stream` (sender-side metrics).
 #[derive(Debug, Clone, Copy)]
@@ -41,8 +43,57 @@ pub struct StreamQosOpts {
 /// Receive RTP, decode H.264, and show a minifb window (blocking UI thread).
 #[cfg(feature = "display")]
 pub async fn recv_with_display(local: &str, width: u32, height: u32) -> anyhow::Result<()> {
-    let receiver = Receiver::bind(local).await?;
-    receiver_view::run_with_display(receiver, width, height).await
+    recv_with_display_av(local, width, height, false, false, DEFAULT_FPS).await
+}
+
+/// Receive video window plus optional Opus audio playback.
+#[cfg(all(feature = "display", feature = "audio"))]
+pub async fn recv_with_display_av(
+    local: &str,
+    width: u32,
+    height: u32,
+    with_audio: bool,
+    audio_playback: bool,
+    fps: u32,
+) -> anyhow::Result<()> {
+    if !with_audio {
+        let receiver = Receiver::bind(local).await?;
+        return receiver_view::run_with_display(receiver, width, height, None).await;
+    }
+    let audio_local = zerocast_protocol::audio_bind_from_video(local, None)?;
+    eprintln!(
+        "audio: listening on {audio_local}{}",
+        if audio_playback { " (playback)" } else { " (log)" }
+    );
+    let sync = std::sync::Arc::new(AvSyncState::new(fps));
+    let video = Receiver::bind(local).await?;
+    let audio = audio_rtp::AudioReceiver::bind(&audio_local).await?;
+    let sync_a = sync.clone();
+    let audio_handle = tokio::spawn(async move {
+        if audio_playback {
+            audio.run_playback(Some(sync_a)).await
+        } else {
+            audio.run_log(Some(sync_a)).await
+        }
+    });
+    let result = receiver_view::run_with_display(video, width, height, Some(sync)).await;
+    audio_handle.abort();
+    result
+}
+
+#[cfg(all(feature = "display", not(feature = "audio")))]
+pub async fn recv_with_display_av(
+    local: &str,
+    width: u32,
+    height: u32,
+    with_audio: bool,
+    _audio_playback: bool,
+    _fps: u32,
+) -> anyhow::Result<()> {
+    if with_audio {
+        anyhow::bail!("this binary was built without the `audio` feature");
+    }
+    recv_with_display(local, width, height).await
 }
 
 /// Max RTP payload before UDP fragmentation on typical LAN MTU.
@@ -398,7 +449,10 @@ pub async fn capture_encode_and_stream(
     fps: u32,
     max_frames: u64,
 ) -> anyhow::Result<()> {
-    capture_encode_and_stream_with_qos(local, target, width, height, fps, max_frames, None, false, false).await
+    capture_encode_and_stream_with_qos(
+        local, target, width, height, fps, max_frames, None, false, false, false, None,
+    )
+    .await
 }
 
 pub async fn capture_encode_and_stream_with_qos(
@@ -411,6 +465,8 @@ pub async fn capture_encode_and_stream_with_qos(
     qos: Option<StreamQosOpts>,
     test_cycle: bool,
     with_audio: bool,
+    use_test_tone: bool,
+    audio_target_override: Option<&str>,
 ) -> anyhow::Result<()> {
     // Screen + network setup before ffmpeg: a long gap after the first stdin writes
     // makes ffmpeg's pipe encoder stop producing output on Windows.
@@ -444,6 +500,8 @@ pub async fn capture_encode_and_stream_with_qos(
         qos,
         test_cycle,
         with_audio,
+        use_test_tone,
+        audio_target_override,
     )
     .await
 }
@@ -471,6 +529,8 @@ pub async fn capture_encode_and_stream_with_encoder(
         None,
         false,
         false,
+        false,
+        None,
     )
     .await
 }
@@ -518,16 +578,29 @@ async fn stream_loop(
     qos: Option<StreamQosOpts>,
     test_cycle: bool,
     with_audio: bool,
+    use_test_tone: bool,
+    audio_target_override: Option<&str>,
 ) -> anyhow::Result<()> {
     use zerocast_core::{QosAction, QosController, StreamMetricsSample, StreamProfile};
 
     #[cfg(feature = "audio")]
     if with_audio {
-        let audio_local = zerocast_protocol::audio_bind_from_video(_local, None)?;
-        let audio_target = zerocast_protocol::audio_target_from_video(_target, None)?;
+        let audio_local = "0.0.0.0:0";
+        let audio_port_override = audio_target_override.as_ref().and_then(|s| {
+            s.parse::<SocketAddr>()
+                .ok()
+                .map(|a| a.port())
+                .filter(|p| *p > 0)
+        });
+        let audio_target =
+            zerocast_protocol::audio_target_from_video(_target, audio_port_override)?;
+        eprintln!("audio: sender {audio_local} -> {audio_target}");
         let max = max_frames;
+        let use_tone = use_test_tone;
         tokio::spawn(async move {
-            if let Err(e) = audio_rtp::audio_stream_loop(&audio_local, &audio_target, max).await {
+            if let Err(e) =
+                audio_rtp::audio_stream_loop(audio_local, &audio_target, max, use_tone).await
+            {
                 eprintln!("audio stream error: {e:#}");
             }
         });
