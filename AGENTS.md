@@ -31,6 +31,7 @@ Repository layout (important paths)
 - apps/desktop — minimal desktop app: [apps/desktop/Cargo.toml](apps/desktop/Cargo.toml)
 - crates/core — shared core logic: [crates/core](crates/core)
 - crates/discovery, transport, protocol, media, audio, video, renderer, ui, platform — focused crates in `crates/`
+- Protocol spec: [docs/spec/std/zerocast-protocol-v1.md](docs/spec/std/zerocast-protocol-v1.md)
 
 High-level architectural notes (concise)
 - Shared Rust core with thin platform adapters.

@@ -8,5 +8,9 @@ license.workspace = true
 [dependencies]
 anyhow = "1.0"
 
+[features]
+default = ["capture"]
+capture = ["dep:scrap"]
+
 [target.'cfg(any(windows, target_os = "macos", target_os = "linux"))'.dependencies]
-scrap = "0.5"
+scrap = { version = "0.5", optional = true }

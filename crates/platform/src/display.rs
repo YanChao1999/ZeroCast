@@ -1,4 +1,7 @@
-use anyhow::{Context, Result};
+use anyhow::Result;
+
+#[cfg(all(feature = "capture", any(windows, target_os = "macos", target_os = "linux")))]
+use anyhow::Context;
 
 /// Primary monitor geometry (refresh rate when unknown defaults to 60 Hz).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -20,7 +23,7 @@ impl PrimaryDisplay {
 
 /// Query the primary display size via `scrap` (desktop OSes).
 pub fn primary_display() -> Result<PrimaryDisplay> {
-    #[cfg(any(windows, target_os = "macos", target_os = "linux"))]
+    #[cfg(all(feature = "capture", any(windows, target_os = "macos", target_os = "linux")))]
     {
         use scrap::Display;
         let display = Display::primary().context("no primary display")?;
@@ -36,7 +39,7 @@ pub fn primary_display() -> Result<PrimaryDisplay> {
             refresh_hz: 60,
         })
     }
-    #[cfg(not(any(windows, target_os = "macos", target_os = "linux")))]
+    #[cfg(not(all(feature = "capture", any(windows, target_os = "macos", target_os = "linux"))))]
     {
         Ok(PrimaryDisplay::stub())
     }

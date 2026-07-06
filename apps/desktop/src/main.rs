@@ -162,6 +162,8 @@ async fn main() -> anyhow::Result<()> {
             let mut argv: Vec<String> = args.collect();
             let discover = take_flag(&mut argv, "--discover");
             let test_cycle = take_flag(&mut argv, "--test-cycle");
+            let with_audio = take_flag(&mut argv, "--audio");
+            let use_test_tone = take_flag(&mut argv, "--test-tone");
             let max_frames: u64 = match require_option_arg(&mut argv, "--frames", "N")? {
                 Some(s) => s.parse().context("--frames must be a positive integer")?,
                 None => 0,
@@ -181,15 +183,25 @@ async fn main() -> anyhow::Result<()> {
 
             let mut qos_recv_cap = None;
             let mut qos_device_class = zerocast_core::DeviceClass::Desktop;
+            let mut audio_target_override: Option<String> = None;
 
             let (target, width, height, fps) = if discover {
                 let found = zerocast_discovery::browse_streams(
-                    zerocast_discovery::DEFAULT_BROWSE_TIMEOUT,
+                    zerocast_discovery::browse_timeout_from_env(),
                 )
                 .await?;
                 let ad = zerocast_discovery::pick_receiver(found)?;
                 ad.validate_dimensions()?;
                 let target = ad.target_addr();
+                if with_audio {
+                    if ad.audio {
+                        let audio_target = ad.audio_target_addr();
+                        eprintln!("mdns: Opus audio at {audio_target}");
+                        audio_target_override = Some(audio_target);
+                    } else {
+                        eprintln!("mdns: receiver has no audio=1 in TXT; using video port + 2");
+                    }
+                }
                 qos_recv_cap = Some(receiver_capability_from_ad(
                     &ad,
                     zerocast_transport::DEFAULT_FPS,
@@ -221,6 +233,15 @@ async fn main() -> anyhow::Result<()> {
                 argv.remove(0);
                 if let Some(ad) = zerocast_discovery::receiver_for_target(&target) {
                     ad.validate_dimensions()?;
+                    if with_audio && ad.audio {
+                        let audio_port = (ad.audio_port > 0).then_some(ad.audio_port);
+                        let audio_target =
+                            zerocast_protocol::audio_target_from_video(&target, audio_port)?;
+                        eprintln!(
+                            "local: Opus audio at {audio_target} (from stream target {target})"
+                        );
+                        audio_target_override = Some(audio_target);
+                    }
                     qos_recv_cap = Some(receiver_capability_from_ad(
                         &ad,
                         zerocast_transport::DEFAULT_FPS,
@@ -271,6 +292,16 @@ async fn main() -> anyhow::Result<()> {
             if max_frames > 0 {
                 eprintln!("stream: will stop after {max_frames} frames");
             }
+            if with_audio {
+                eprintln!(
+                    "stream: Opus audio enabled{}",
+                    if use_test_tone {
+                        " (440 Hz test tone)"
+                    } else {
+                        " (mic or test tone fallback)"
+                    }
+                );
+            }
             println!(
                 "Streaming H.264 over RTP (ffmpeg CLI): {} -> {} ({}x{} @ {} fps{})",
                 local,
@@ -300,12 +331,31 @@ async fn main() -> anyhow::Result<()> {
                 max_frames,
                 Some(qos),
                 test_cycle,
+                with_audio,
+                use_test_tone,
+                audio_target_override.as_deref(),
             )
             .await?;
         }
         Some("recv") => {
+            #[cfg(not(feature = "display"))]
+            {
+                anyhow::bail!(
+                    "this binary was built without the `display` feature (headless recv only).\n  \
+                     use `recv-log`, or rebuild with `--features display` and aarch64 X11 libs,\n  \
+                     or build natively inside the ARM VM: cargo build -p zerocast_desktop --release"
+                );
+            }
+
+            #[cfg(feature = "display")]
+            {
             let mut argv: Vec<String> = args.collect();
             let no_mdns = take_flag(&mut argv, "--no-mdns");
+            let mut with_audio = take_flag(&mut argv, "--audio");
+            let audio_playback = take_flag(&mut argv, "--audio-play");
+            if audio_playback {
+                with_audio = true;
+            }
             let profile_name =
                 require_option_arg(&mut argv, "--profile", "low|med|high|auto")?;
             let profile_kind = match profile_name.as_deref() {
@@ -353,25 +403,120 @@ async fn main() -> anyhow::Result<()> {
                     Some(zerocast_core::ProfileKind::Low) => Some("embedded"),
                     _ => None,
                 };
-                Some(zerocast_discovery::StreamPublisher::register_with_class(
-                    &instance, port, width, height, fps, device_class,
+                Some(zerocast_discovery::StreamPublisher::register_with_class_and_audio(
+                    &instance, port, width, height, fps, device_class, with_audio,
                 )?)
             } else {
                 None
             };
 
+            if audio_playback {
+                #[cfg(not(feature = "audio-io"))]
+                anyhow::bail!(
+                    "audio playback requires `--features audio-io` (libasound2-dev on Linux)"
+                );
+            }
+
             println!(
-                "Receiver with video window ({}x{}, Escape to quit): {}",
-                width, height, local
+                "Receiver with video window ({}x{}, Escape to quit): {}{}",
+                width,
+                height,
+                local,
+                if with_audio {
+                    if audio_playback {
+                        " + audio playback"
+                    } else {
+                        " + audio log"
+                    }
+                } else {
+                    ""
+                }
             );
-            zerocast_transport::recv_with_display(&local, width, height).await?;
+            zerocast_transport::recv_with_display_av(
+                &local,
+                width,
+                height,
+                with_audio,
+                audio_playback,
+                fps,
+            )
+            .await?;
             drop(publisher);
+            }
         }
         Some("recv-log") => {
-            let local = args.next().expect("missing local arg (e.g. 0.0.0.0:5000)");
-            println!("Running receiver (log only): {}", local);
-            let r = zerocast_transport::Receiver::bind(&local).await?;
-            r.run().await?;
+            let mut argv: Vec<String> = args.collect();
+            let no_mdns = take_flag(&mut argv, "--no-mdns");
+            let mut with_audio = take_flag(&mut argv, "--audio");
+            let audio_playback = take_flag(&mut argv, "--audio-play");
+            if audio_playback {
+                with_audio = true;
+            }
+            let profile_name =
+                require_option_arg(&mut argv, "--profile", "low|med|high|auto")?;
+            let profile_kind = match profile_name.as_deref() {
+                None => Some(zerocast_core::ProfileKind::Low),
+                Some(name) => Some(parse_profile_kind(name)?),
+            };
+
+            let local = argv.first().cloned().ok_or_else(|| {
+                anyhow::anyhow!(
+                    "recv-log requires <local>\n  \
+                     e.g. recv-log 0.0.0.0:5000\n  \
+                     e.g. recv-log 0.0.0.0:5000 --profile low\n  \
+                     mDNS publish is on by default (use --no-mdns to disable)"
+                )
+            })?;
+            argv.remove(0);
+
+            let display = log_primary_display();
+            let (width, height, fps) = profile_dims(profile_kind.unwrap(), &display);
+
+            let publisher = if !no_mdns {
+                let port = zerocast_discovery::listen_port(&local)?;
+                let instance = zerocast_discovery::local_instance_name();
+                let device_class = match profile_kind {
+                    Some(zerocast_core::ProfileKind::Low) => Some("embedded"),
+                    _ => None,
+                };
+                Some(zerocast_discovery::StreamPublisher::register_with_class_and_audio(
+                    &instance, port, width, height, fps, device_class, with_audio,
+                )?)
+            } else {
+                None
+            };
+
+            if audio_playback {
+                #[cfg(not(feature = "audio-io"))]
+                anyhow::bail!(
+                    "audio playback requires `--features audio-io` (libasound2-dev on Linux)"
+                );
+            }
+
+            println!(
+                "Running receiver (log only): {}{}{}",
+                local,
+                if with_audio { " + audio" } else { "" },
+                if audio_playback { " (playback)" } else { "" }
+            );
+            #[cfg(feature = "audio")]
+            {
+                let opts = zerocast_transport::RecvAvOpts {
+                    with_audio,
+                    playback: audio_playback,
+                    video_fps: fps,
+                };
+                zerocast_transport::recv_log_av(&local, opts).await?;
+            }
+            #[cfg(not(feature = "audio"))]
+            {
+                if with_audio {
+                    anyhow::bail!("this binary was built without the `audio` feature");
+                }
+                let r = zerocast_transport::Receiver::bind(&local).await?;
+                r.run().await?;
+            }
+            drop(publisher);
         }
         _ => {
             eprintln!(
@@ -381,10 +526,10 @@ async fn main() -> anyhow::Result<()> {
                  zerocast_desktop stream <local> <target> [width] [height] [fps]\n  \
                  zerocast_desktop stream <local> --discover [--profile low|med|high|auto]\n  \
                  zerocast_desktop stream <local> <target> --profile auto [--frames N] [--test-cycle]\n  \
-                 zerocast_desktop stream <local> <target> --profile low --frames 11 --test-cycle\n  \
-                 zerocast_desktop recv <local> <width> <height> [fps] [--no-mdns]\n  \
-                 zerocast_desktop recv <local> --profile low|med|high|auto [--no-mdns]\n  \
-                 zerocast_desktop recv-log <local>\n  \
+                 zerocast_desktop stream <local> <target> --profile low --frames 11 --test-cycle [--audio] [--test-tone]\n  \
+                 zerocast_desktop recv <local> <width> <height> [fps] [--no-mdns] [--audio] [--audio-play]\n  \
+                 zerocast_desktop recv <local> --profile low|med|high|auto [--no-mdns] [--audio] [--audio-play]\n  \
+                 zerocast_desktop recv-log <local> [--profile low|med|high|auto] [--no-mdns] [--audio] [--audio-play]\n  \
                  zerocast_desktop --version\n\n\
                  Zero-config: start recv first (publishes via mDNS), then stream --discover.\n\n\
                  Requires `ffmpeg` on PATH for real H.264 (libx264). \
