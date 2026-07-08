@@ -1,0 +1,286 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="ZeroCast — zero-configuration LAN screen casting. Lightweight, native, no cloud, no accounts. Built in Rust for Windows, macOS, Linux, and beyond.">
+  <meta name="theme-color" content="#0a0e17">
+  <meta property="og:title" content="ZeroCast — LAN Screen Casting">
+  <meta property="og:description" content="Lightweight, zero-config screen casting on your local network. No cloud. No accounts. Just cast.">
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="https://yanchao1999.github.io/ZeroCast/">
+  <title>ZeroCast — Zero-Config LAN Screen Casting</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📡</text></svg>">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <nav class="nav">
+    <div class="container nav-inner">
+      <a href="#" class="logo">
+        <span class="logo-icon" aria-hidden="true">◉</span>
+        ZeroCast
+      </a>
+      <div class="nav-links">
+        <a href="#features">Features</a>
+        <a href="#how-it-works">How it works</a>
+        <a href="#quick-start">Quick start</a>
+        <a href="#roadmap">Roadmap</a>
+        <a href="https://github.com/YanChao1999/ZeroCast" class="nav-cta" target="_blank" rel="noopener">GitHub</a>
+      </div>
+      <button class="nav-toggle" aria-label="Toggle menu" aria-expanded="false">
+        <span></span><span></span><span></span>
+      </button>
+    </div>
+  </nav>
+
+  <header class="hero">
+    <div class="hero-bg" aria-hidden="true"></div>
+    <div class="container hero-content">
+      <div class="badge">v0.2.0 · Open Source · MIT</div>
+      <h1>Cast your screen.<br><span class="gradient-text">Zero config.</span></h1>
+      <p class="hero-sub">
+        Lightweight LAN screen casting built in Rust. Discover receivers on your network,
+        stream H.264 with Opus audio — no cloud, no accounts, no middleman.
+      </p>
+      <div class="hero-actions">
+        <a href="https://github.com/YanChao1999/ZeroCast" class="btn btn-primary" target="_blank" rel="noopener">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
+          View on GitHub
+        </a>
+        <a href="#quick-start" class="btn btn-secondary">Get started</a>
+      </div>
+      <div class="hero-stats">
+        <div class="stat">
+          <span class="stat-value">&lt;50ms</span>
+          <span class="stat-label">Target latency</span>
+        </div>
+        <div class="stat">
+          <span class="stat-value">LAN</span>
+          <span class="stat-label">Local network only</span>
+        </div>
+        <div class="stat">
+          <span class="stat-value">5+</span>
+          <span class="stat-label">Platform targets</span>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <section id="features" class="section">
+    <div class="container">
+      <h2 class="section-title">Why ZeroCast?</h2>
+      <p class="section-desc">Built for developers, homelabs, and edge devices — not for selling you a subscription.</p>
+      <div class="features-grid">
+        <article class="feature-card">
+          <div class="feature-icon" aria-hidden="true">⚡</div>
+          <h3>Zero configuration</h3>
+          <p>mDNS discovery finds receivers on your LAN automatically. Start casting in two terminal commands — no IP addresses, no pairing codes.</p>
+        </article>
+        <article class="feature-card">
+          <div class="feature-icon" aria-hidden="true">🔒</div>
+          <h3>LAN-only privacy</h3>
+          <p>Your screen never leaves your network. No cloud relay, no accounts, no telemetry. What happens on your LAN stays on your LAN.</p>
+        </article>
+        <article class="feature-card">
+          <div class="feature-icon" aria-hidden="true">🦀</div>
+          <h3>Native Rust core</h3>
+          <p>One shared codebase with thin platform adapters. Hardware encoders, GPU textures, and a zero-copy pipeline target for minimal overhead.</p>
+        </article>
+        <article class="feature-card">
+          <div class="feature-icon" aria-hidden="true">📺</div>
+          <h3>Quality profiles</h3>
+          <p>From Pi Zero W–class 426p15 to full 1080p60. Profiles negotiate resolution and frame rate between sender and receiver.</p>
+        </article>
+        <article class="feature-card">
+          <div class="feature-icon" aria-hidden="true">🔊</div>
+          <h3>Audio + video sync</h3>
+          <p>Opus audio over RTP with RTCP-based A/V synchronization. Native codec support with ffmpeg fallback for interoperability.</p>
+        </article>
+        <article class="feature-card">
+          <div class="feature-icon" aria-hidden="true">🌐</div>
+          <h3>Cross-platform</h3>
+          <p>Windows, macOS, and Linux today. Android receiver, iOS via ReplayKit, and Linux ARM boards (Raspberry Pi) on the roadmap.</p>
+        </article>
+      </div>
+    </div>
+  </section>
+
+  <section id="how-it-works" class="section section-alt">
+    <div class="container">
+      <h2 class="section-title">How it works</h2>
+      <p class="section-desc">A lean media pipeline designed for low latency on local networks.</p>
+      <div class="pipeline">
+        <div class="pipeline-step">
+          <div class="pipeline-node">Capture</div>
+          <p>Screen grab via native APIs</p>
+        </div>
+        <div class="pipeline-arrow" aria-hidden="true">→</div>
+        <div class="pipeline-step">
+          <div class="pipeline-node">Encode</div>
+          <p>H.264 hardware encoder</p>
+        </div>
+        <div class="pipeline-arrow" aria-hidden="true">→</div>
+        <div class="pipeline-step">
+          <div class="pipeline-node">Transport</div>
+          <p>RTP/UDP over LAN</p>
+        </div>
+        <div class="pipeline-arrow" aria-hidden="true">→</div>
+        <div class="pipeline-step">
+          <div class="pipeline-node">Decode</div>
+          <p>HW decode → display</p>
+        </div>
+      </div>
+      <div class="stack-grid">
+        <div class="stack-item"><strong>Discovery</strong> mDNS-SD</div>
+        <div class="stack-item"><strong>Video</strong> H.264 / RTP</div>
+        <div class="stack-item"><strong>Audio</strong> Opus / RTP</div>
+        <div class="stack-item"><strong>Control</strong> QUIC / TCP</div>
+        <div class="stack-item"><strong>UI</strong> egui + wgpu</div>
+        <div class="stack-item"><strong>Runtime</strong> tokio</div>
+      </div>
+    </div>
+  </section>
+
+  <section id="quick-start" class="section">
+    <div class="container">
+      <h2 class="section-title">Quick start</h2>
+      <p class="section-desc">Requires <a href="https://ffmpeg.org/download.html" target="_blank" rel="noopener">ffmpeg</a> on PATH and a Rust toolchain.</p>
+
+      <div class="code-block">
+        <div class="code-header">
+          <span>Build</span>
+          <button class="copy-btn" data-copy="build" aria-label="Copy build commands">Copy</button>
+        </div>
+        <pre id="code-build"><code>cargo build --workspace
+cargo test --workspace</code></pre>
+      </div>
+
+      <div class="code-block">
+        <div class="code-header">
+          <span>Zero-config cast (two terminals)</span>
+          <button class="copy-btn" data-copy="cast" aria-label="Copy cast commands">Copy</button>
+        </div>
+        <pre id="code-cast"><code># Terminal 1 — receiver (publishes via mDNS)
+cargo run -p zerocast_desktop -- recv 0.0.0.0:5000 --profile low
+
+# Terminal 2 — sender (discovers receiver on LAN)
+cargo run -p zerocast_desktop -- stream 0.0.0.0:0 --discover --profile low</code></pre>
+      </div>
+
+      <div class="profiles">
+        <h3>Quality profiles</h3>
+        <div class="profile-cards">
+          <div class="profile-card">
+            <span class="profile-name">low</span>
+            <span class="profile-spec">426×240 @ 15 fps</span>
+            <span class="profile-note">Pi Zero W / low bandwidth</span>
+          </div>
+          <div class="profile-card">
+            <span class="profile-name">med</span>
+            <span class="profile-spec">1280×720 @ 30 fps</span>
+            <span class="profile-note">Balanced quality</span>
+          </div>
+          <div class="profile-card">
+            <span class="profile-name">high</span>
+            <span class="profile-spec">1920×1080 @ 60 fps</span>
+            <span class="profile-note">Full HD</span>
+          </div>
+          <div class="profile-card">
+            <span class="profile-name">auto</span>
+            <span class="profile-spec">Display native</span>
+            <span class="profile-note">Capped at 1080p60</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="roadmap" class="section section-alt">
+    <div class="container">
+      <h2 class="section-title">Roadmap</h2>
+      <div class="roadmap">
+        <div class="roadmap-item done">
+          <span class="roadmap-status">✓</span>
+          <div>
+            <strong>Desktop MVP</strong>
+            <p>Screen capture, H.264 encode, RTP streaming, rendering</p>
+          </div>
+        </div>
+        <div class="roadmap-item done">
+          <span class="roadmap-status">✓</span>
+          <div>
+            <strong>mDNS discovery</strong>
+            <p>Zero-config LAN receiver discovery</p>
+          </div>
+        </div>
+        <div class="roadmap-item done">
+          <span class="roadmap-status">✓</span>
+          <div>
+            <strong>Audio v0–v1.2</strong>
+            <p>Opus RTP, native codec, RTCP A/V sync</p>
+          </div>
+        </div>
+        <div class="roadmap-item active">
+          <span class="roadmap-status">→</span>
+          <div>
+            <strong>QoS closed loop</strong>
+            <p>Hot reconfigure, RTCP feedback, recv lag control</p>
+          </div>
+        </div>
+        <div class="roadmap-item">
+          <span class="roadmap-status">○</span>
+          <div>
+            <strong>Android receiver</strong>
+            <p>Then sender support</p>
+          </div>
+        </div>
+        <div class="roadmap-item">
+          <span class="roadmap-status">○</span>
+          <div>
+            <strong>iOS support</strong>
+            <p>ReplayKit + VideoToolbox</p>
+          </div>
+        </div>
+        <div class="roadmap-item">
+          <span class="roadmap-status">○</span>
+          <div>
+            <strong>Embedded receivers</strong>
+            <p>Linux ARM — Raspberry Pi Zero W over Wi-Fi</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="section cta-section">
+    <div class="container cta-inner">
+      <h2>Ready to cast?</h2>
+      <p>Clone the repo, build with Cargo, and stream across your LAN in minutes.</p>
+      <div class="hero-actions">
+        <a href="https://github.com/YanChao1999/ZeroCast" class="btn btn-primary" target="_blank" rel="noopener">Star on GitHub</a>
+        <a href="https://github.com/YanChao1999/ZeroCast/blob/main/docs/spec/std/zerocast-protocol-v1.md" class="btn btn-secondary" target="_blank" rel="noopener">Read the protocol spec</a>
+      </div>
+    </div>
+  </section>
+
+  <footer class="footer">
+    <div class="container footer-inner">
+      <div class="footer-brand">
+        <span class="logo-icon" aria-hidden="true">◉</span>
+        <span>ZeroCast</span>
+      </div>
+      <p>MIT License · Copyright © 2026 YanChao1999</p>
+      <div class="footer-links">
+        <a href="https://github.com/YanChao1999/ZeroCast" target="_blank" rel="noopener">Repository</a>
+        <a href="https://github.com/YanChao1999/ZeroCast/issues" target="_blank" rel="noopener">Issues</a>
+        <a href="https://github.com/YanChao1999/ZeroCast/blob/main/README.md" target="_blank" rel="noopener">README</a>
+      </div>
+    </div>
+  </footer>
+
+  <script src="js/main.js"></script>
+</body>
+</html>
