@@ -27,7 +27,7 @@ jobs:
       - name: Unit tests (workspace, lib only)
         run: cargo test --workspace --lib
       - name: Opus encoder smoke (native opus-rs)
-        run: cargo test -p zerocast_audio encode_sine_frame native::tests::native_sine_roundtrip -- --nocapture
+        run: cargo test -p zerocast_audio sine -- --nocapture
       - name: FFmpeg integration (426p + 720p roundtrip)
         run: cargo test -p zerocast_transport --test ffmpeg_integration
       - name: QoS controller tests
