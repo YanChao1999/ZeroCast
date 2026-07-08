@@ -16,7 +16,7 @@ Open http://localhost:8080
 
 ## Deployment
 
-This site deploys automatically via GitHub Actions when changes are pushed to the `gh-pages` branch (`.github/workflows/pages.yml`).
+This site deploys automatically via GitHub Actions when changes are pushed to the `main` branch (`.github/workflows/pages.yml`).
 
 **One-time setup in the GitHub repo:**
 
