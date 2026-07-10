@@ -29,6 +29,18 @@ html {
   scroll-behavior: smooth;
 }
 
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+
+  .btn,
+  .feature-card,
+  .copy-btn {
+    transition: none;
+  }
+}
+
 body {
   font-family: var(--font);
   background: var(--bg);

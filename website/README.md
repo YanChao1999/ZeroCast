@@ -21,8 +21,8 @@ This site deploys automatically via GitHub Actions when changes are pushed to th
 **One-time setup in the GitHub repo:**
 
 1. Go to **Settings → Pages**
-2. Under **Build and deployment**, set **Source** to **GitHub Actions**
-3. Push the `gh-pages` branch to `origin`
+2. Under **Build and deployment**, set **Source** to **GitHub Actions** (not “Deploy from a branch”)
+3. Merge this PR into `main` — the deploy workflow runs automatically on push
 
 The site will be available at:
 

@@ -4,6 +4,14 @@
     cast: document.getElementById('code-cast')?.textContent ?? '',
   };
 
+  function resetCopyBtn(btn, delayMs) {
+    clearTimeout(btn._copyResetTimer);
+    btn._copyResetTimer = setTimeout(() => {
+      btn.textContent = 'Copy';
+      btn.classList.remove('copied');
+    }, delayMs);
+  }
+
   document.querySelectorAll('.copy-btn').forEach((btn) => {
     btn.addEventListener('click', async () => {
       const key = btn.dataset.copy;
@@ -14,15 +22,11 @@
         await navigator.clipboard.writeText(text.trim());
         btn.textContent = 'Copied!';
         btn.classList.add('copied');
-        setTimeout(() => {
-          btn.textContent = 'Copy';
-          btn.classList.remove('copied');
-        }, 2000);
+        resetCopyBtn(btn, 2000);
       } catch {
         btn.textContent = 'Failed';
-        setTimeout(() => {
-          btn.textContent = 'Copy';
-        }, 2000);
+        btn.classList.remove('copied');
+        resetCopyBtn(btn, 2000);
       }
     });
   });
