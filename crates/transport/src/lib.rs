@@ -8,7 +8,11 @@ use webrtc_util::marshal::{Marshal, Unmarshal};
 mod av_sync;
 mod decoder;
 #[cfg(feature = "audio")]
+#[cfg(feature = "audio-playback")]
+mod audio_playout;
+#[cfg(feature = "audio")]
 mod audio_rtp;
+mod rtcp;
 #[cfg(feature = "display")]
 mod display;
 mod encoder;
@@ -111,7 +115,7 @@ pub struct Sender {
 
 pub struct Receiver {
     socket: tokio::net::UdpSocket,
-    rtcp_rx: tokio::sync::mpsc::UnboundedReceiver<(u32, u32, u32, u32)>,
+    rtcp_rx: tokio::sync::mpsc::UnboundedReceiver<rtcp::RtcpSrAnchor>,
 }
 
 impl Sender {
@@ -180,26 +184,9 @@ impl Sender {
         let Some(rtcp_target) = self.rtcp_target() else {
             return Ok(());
         };
-        const NTP_UNIX_OFFSET: u64 = 2_208_988_800u64;
-        let now_dur = SystemTime::now().duration_since(UNIX_EPOCH)?;
-        let unix_secs = now_dur.as_secs();
-        let unix_nanos = now_dur.subsec_nanos() as u128;
-        let ntp_secs = unix_secs.saturating_add(NTP_UNIX_OFFSET) as u32;
-        let ntp_frac = ((unix_nanos * (1u128 << 32)) / 1_000_000_000u128) as u32;
-
-        let length: u16 = 6;
-        let mut sr: Vec<u8> = Vec::with_capacity(28);
-        sr.push(0x80u8);
-        sr.push(200u8);
-        sr.push(((length >> 8) & 0xFF) as u8);
-        sr.push((length & 0xFF) as u8);
-        sr.extend_from_slice(&self.ssrc.to_be_bytes());
-        sr.extend_from_slice(&ntp_secs.to_be_bytes());
-        sr.extend_from_slice(&ntp_frac.to_be_bytes());
-        sr.extend_from_slice(&frame_rtp_ts.to_be_bytes());
-        sr.extend_from_slice(&0u32.to_be_bytes());
-        sr.extend_from_slice(&0u32.to_be_bytes());
-
+        let now_ns = SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos();
+        let (ntp_secs, ntp_frac) = rtcp::wall_to_ntp(now_ns);
+        let sr = rtcp::build_rtcp_sr(self.ssrc, frame_rtp_ts, ntp_secs, ntp_frac);
         let _ = self.socket.send_to(&sr, &rtcp_target).await;
         Ok(())
     }
@@ -266,15 +253,9 @@ impl Receiver {
             loop {
                 match rtcp_socket.recv_from(&mut buf).await {
                     Ok((n, _addr)) => {
-                        if n < 28 { continue; }
-                        // minimal SR: PT=200 at buf[1]
-                        if buf[1] != 200 { continue; }
-                        // parse SSRC, NTP secs, NTP frac, RTP timestamp
-                        let ssrc = u32::from_be_bytes([buf[4], buf[5], buf[6], buf[7]]);
-                        let ntp_secs = u32::from_be_bytes([buf[8], buf[9], buf[10], buf[11]]);
-                        let ntp_frac = u32::from_be_bytes([buf[12], buf[13], buf[14], buf[15]]);
-                        let rtp_ts = u32::from_be_bytes([buf[16], buf[17], buf[18], buf[19]]);
-                        let _ = tx.send((ssrc, ntp_secs, ntp_frac, rtp_ts));
+                        if let Some(anchor) = rtcp::parse_rtcp_sr(&buf[..n]) {
+                            let _ = tx.send(anchor);
+                        }
                     }
                     Err(_) => break,
                 }
@@ -292,7 +273,19 @@ impl Receiver {
     }
 
     /// Run receiver loop; invoke `on_frame` with a complete Annex-B access unit on RTP marker.
-    pub async fn run_frame_delivery<F>(self, mut on_frame: F) -> anyhow::Result<()>
+    pub async fn run_frame_delivery<F>(self, on_frame: F) -> anyhow::Result<()>
+    where
+        F: FnMut(u32, u32, Vec<u8>),
+    {
+        self.run_frame_delivery_with_sync(on_frame, None).await
+    }
+
+    /// Like [`run_frame_delivery`] but feeds RTCP SR anchors into optional A/V sync state.
+    pub async fn run_frame_delivery_with_sync<F>(
+        self,
+        mut on_frame: F,
+        sync: Option<std::sync::Arc<AvSyncState>>,
+    ) -> anyhow::Result<()>
     where
         F: FnMut(u32, u32, Vec<u8>),
     {
@@ -311,14 +304,12 @@ impl Receiver {
         let mut rtcp_rx = self.rtcp_rx;
         loop {
             // drain any pending RTCP Sender Reports first
-            while let Ok((ssrc_sr, ntp_secs, ntp_frac, rtp_ts)) = rtcp_rx.try_recv() {
-                const NTP_UNIX_OFFSET: u64 = 2_208_988_800u64;
-                let ntp_secs_u64 = ntp_secs as u64;
-                let unix_secs = ntp_secs_u64.saturating_sub(NTP_UNIX_OFFSET) as u128;
-                let frac_ns = ((ntp_frac as u128) * 1_000_000_000u128) / (1u128 << 32);
-                let base_now_ns = unix_secs.saturating_mul(1_000_000_000u128).saturating_add(frac_ns);
-                ssrc_bases.insert(ssrc_sr, (rtp_ts, base_now_ns));
-                ssrc_last_ts.insert(ssrc_sr, rtp_ts);
+            while let Ok(anchor) = rtcp_rx.try_recv() {
+                if let Some(s) = &sync {
+                    s.on_video_rtcp_sr(anchor);
+                }
+                ssrc_bases.insert(anchor.ssrc, (anchor.rtp_ts, anchor.wall_ns));
+                ssrc_last_ts.insert(anchor.ssrc, anchor.rtp_ts);
             }
 
             let (n, addr) = self.socket.recv_from(&mut buf).await?;

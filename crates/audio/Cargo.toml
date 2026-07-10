@@ -4,14 +4,16 @@ version.workspace = true
 edition.workspace = true
 publish.workspace = true
 license.workspace = true
-description = "ZeroCast audio capture and Opus encode (ffmpeg libopus)"
+description = "ZeroCast audio capture and Opus encode/decode (opus-rs + optional ffmpeg fallback)"
 
 [dependencies]
 zerocast_protocol = { path = "../protocol" }
 anyhow = "1.0"
+opus-rs = "0.1.23"
 cpal = { version = "0.15", optional = true }
 
 [features]
-default = []
+default = ["ffmpeg-opus"]
 capture = ["dep:cpal"]
 playback = ["dep:cpal"]
+ffmpeg-opus = []

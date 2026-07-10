@@ -918,6 +918,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9f7c3e4beb33f85d45ae3e3a1792185706c8e16d043238c593331cc7cd313b50"
 
 [[package]]
+name = "opus-rs"
+version = "0.1.23"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1cc978697f3ada0ad98b323b9d85e85c6b08d478830148636c19b6d5f2ac9b85"
+
+[[package]]
 name = "orbclient"
 version = "0.3.55"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2091,6 +2097,7 @@ version = "0.2.0"
 dependencies = [
  "anyhow",
  "cpal",
+ "opus-rs",
  "zerocast_protocol",
 ]
 
