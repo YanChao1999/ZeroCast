@@ -513,7 +513,7 @@ async fn main() -> anyhow::Result<()> {
                 if with_audio {
                     anyhow::bail!("this binary was built without the `audio` feature");
                 }
-                let r = zerocast_transport::Receiver::bind(&local).await?;
+                let r = zerocast_transport::Receiver::bind_with_fps(&local, fps).await?;
                 r.run().await?;
             }
             drop(publisher);

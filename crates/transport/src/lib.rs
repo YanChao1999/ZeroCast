@@ -12,6 +12,7 @@ mod decoder;
 mod audio_playout;
 #[cfg(feature = "audio")]
 mod audio_rtp;
+mod recv_qos;
 mod rtcp;
 #[cfg(feature = "display")]
 mod display;
@@ -30,6 +31,8 @@ pub use encoder::{
 };
 pub use h264_rtp::nalus_to_annex_b;
 pub use av_sync::AvSyncState;
+pub use recv_qos::{new_shared, RecvQoSWindow, SharedRecvQoS};
+pub use rtcp::RecvFeedback;
 pub use test_pattern::{decoded_cycle_from_rgb, test_cycle_frame, CYCLE_COUNT};
 #[cfg(feature = "audio")]
 pub use audio_rtp::{recv_log_av, audio_stream_loop, AudioReceiver, AudioSender, RecvAvOpts};
@@ -61,7 +64,7 @@ pub async fn recv_with_display_av(
     fps: u32,
 ) -> anyhow::Result<()> {
     if !with_audio {
-        let receiver = Receiver::bind(local).await?;
+        let receiver = Receiver::bind_with_fps(local, fps).await?;
         return receiver_view::run_with_display(receiver, width, height, None).await;
     }
     let audio_local = zerocast_protocol::audio_bind_from_video(local, None)?;
@@ -70,7 +73,7 @@ pub async fn recv_with_display_av(
         if audio_playback { " (playback)" } else { " (log)" }
     );
     let sync = std::sync::Arc::new(AvSyncState::new(fps));
-    let video = Receiver::bind(local).await?;
+    let video = Receiver::bind_with_fps(local, fps).await?;
     let audio = audio_rtp::AudioReceiver::bind(&audio_local).await?;
     let sync_a = sync.clone();
     let audio_handle = tokio::spawn(async move {
@@ -92,12 +95,12 @@ pub async fn recv_with_display_av(
     height: u32,
     with_audio: bool,
     _audio_playback: bool,
-    _fps: u32,
+    fps: u32,
 ) -> anyhow::Result<()> {
     if with_audio {
         anyhow::bail!("this binary was built without the `audio` feature");
     }
-    let receiver = Receiver::bind(local).await?;
+    let receiver = Receiver::bind_with_fps(local, fps).await?;
     receiver_view::run_with_display(receiver, width, height, None).await
 }
 
@@ -116,6 +119,10 @@ pub struct Sender {
 pub struct Receiver {
     socket: tokio::net::UdpSocket,
     rtcp_rx: tokio::sync::mpsc::UnboundedReceiver<rtcp::RtcpSrAnchor>,
+    qos: SharedRecvQoS,
+    sender_addr: std::sync::Arc<std::sync::Mutex<Option<SocketAddr>>>,
+    #[allow(dead_code)]
+    recv_ssrc: u32,
 }
 
 impl Sender {
@@ -191,6 +198,15 @@ impl Sender {
         Ok(())
     }
 
+    /// Non-blocking read of recv RTCP APP feedback (ZeroCast QoS).
+    pub async fn try_recv_feedback(&self) -> Option<rtcp::RecvFeedback> {
+        let mut buf = [0u8; 64];
+        match self.socket.try_recv_from(&mut buf) {
+            Ok((n, _)) => rtcp::parse_recv_feedback(&buf[..n]),
+            Err(_) => None,
+        }
+    }
+
     /// Send Annex-B NALUs as RTP (RFC 6184 packetization via `rtp::codecs::h264`).
     pub async fn send_nalus(&mut self, nalus: &[Vec<u8>], frame_rtp_ts: u32) -> anyhow::Result<()> {
         let annex_b = h264_rtp::nalus_to_annex_b(nalus);
@@ -240,14 +256,23 @@ fn strip_annex_b_start_code(nalu: &[u8]) -> &[u8] {
 
 impl Receiver {
     pub async fn bind(local: &str) -> anyhow::Result<Self> {
+        Self::bind_with_fps(local, DEFAULT_FPS).await
+    }
+
+    /// Bind with target fps for decode-lag estimation in QoS feedback.
+    pub async fn bind_with_fps(local: &str, target_fps: u32) -> anyhow::Result<Self> {
         let socket = tokio::net::UdpSocket::bind(local).await?;
-        // try to bind RTCP socket at local port + 1 and spawn a reader task sending SRs via channel
+        let std_sock = socket.into_std()?;
+        std_sock.set_nonblocking(true)?;
+        let feedback_std = std_sock.try_clone()?;
+        feedback_std.set_nonblocking(true)?;
+        let socket = tokio::net::UdpSocket::from_std(std_sock)?;
+        let feedback_socket = tokio::net::UdpSocket::from_std(feedback_std)?;
         let local_addr: SocketAddr = local.parse()?;
         let rtcp_port = local_addr.port().wrapping_add(1);
         let rtcp_bind = SocketAddr::new(local_addr.ip(), rtcp_port);
         let rtcp_socket = tokio::net::UdpSocket::bind(rtcp_bind).await?;
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
-        // spawn background task to parse RTCP SRs and forward them
         tokio::spawn(async move {
             let mut buf = vec![0u8; 1500];
             loop {
@@ -261,7 +286,39 @@ impl Receiver {
                 }
             }
         });
-        Ok(Self { socket, rtcp_rx: rx })
+        let qos = recv_qos::new_shared(target_fps);
+        let sender_addr = std::sync::Arc::new(std::sync::Mutex::new(None));
+        let recv_ssrc = SystemTime::now().duration_since(UNIX_EPOCH)?.as_millis() as u32;
+        let feedback_qos = qos.clone();
+        let feedback_sender = sender_addr.clone();
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(std::time::Duration::from_secs(1));
+            loop {
+                interval.tick().await;
+                let dest = match feedback_sender.lock() {
+                    Ok(guard) => *guard,
+                    Err(_) => continue,
+                };
+                let Some(dest) = dest else { continue };
+                let fb = match feedback_qos.lock() {
+                    Ok(mut w) => w.snapshot_feedback(),
+                    Err(_) => continue,
+                };
+                let pkt = rtcp::build_recv_feedback(recv_ssrc, fb);
+                let _ = feedback_socket.send_to(&pkt, dest).await;
+            }
+        });
+        Ok(Self {
+            socket,
+            rtcp_rx: rx,
+            qos,
+            sender_addr,
+            recv_ssrc,
+        })
+    }
+
+    pub fn qos_stats(&self) -> SharedRecvQoS {
+        self.qos.clone()
     }
 
     /// Run receiver loop and log RTP/NALU stats to the console.
@@ -302,6 +359,8 @@ impl Receiver {
         // last delivered sequence per SSRC
         let mut delivered_seq: HashMap<u32, u16> = HashMap::new();
         let mut rtcp_rx = self.rtcp_rx;
+        let qos = self.qos.clone();
+        let sender_addr = self.sender_addr.clone();
         loop {
             // drain any pending RTCP Sender Reports first
             while let Ok(anchor) = rtcp_rx.try_recv() {
@@ -313,6 +372,12 @@ impl Receiver {
             }
 
             let (n, addr) = self.socket.recv_from(&mut buf).await?;
+            if let Ok(mut guard) = sender_addr.lock() {
+                if guard.is_none() {
+                    *guard = Some(addr);
+                    eprintln!("qos: recv feedback target {addr}");
+                }
+            }
             if n < 12 {
                 eprintln!("received too-small packet from {}", addr);
                 continue;
@@ -380,10 +445,27 @@ impl Receiver {
                                     }
                                 };
 
-                                let _lost = match delivered_seq.get(&ssrc) {
-                                    Some(prev) if next > *prev && next - *prev > 1 => (next - *prev - 1) as u32,
+                                let lost = match delivered_seq.get(&ssrc) {
+                                    Some(prev) if next > *prev && next.wrapping_sub(*prev) > 1 => {
+                                        (next.wrapping_sub(*prev) - 1) as u32
+                                    }
                                     _ => 0,
                                 };
+                                if lost > 0 {
+                                    if let Ok(mut w) = qos.lock() {
+                                        w.record_loss(lost);
+                                    }
+                                } else if let Ok(mut w) = qos.lock() {
+                                    w.record_packet();
+                                }
+                                if let Some(pn) = prev_now_ns {
+                                    let interval_ms = ((arr_ns.saturating_sub(pn)) as f64) / 1_000_000.0;
+                                    if interval_ms > 0.0 {
+                                        if let Ok(mut w) = qos.lock() {
+                                            w.record_jitter(interval_ms);
+                                        }
+                                    }
+                                }
 
                                 if !payload_vec.is_empty() {
                                     let entry = frame_assemblers
@@ -714,6 +796,7 @@ async fn stream_loop(
             let fps_actual = stats_frames as f64 / window_secs;
             let avg_encode = stats_encode_ms / stats_frames.max(1) as f64;
             let kbps = (stats_bytes as f64 * 8.0 / 1000.0) / window_secs;
+            let recv_fb = sender.try_recv_feedback().await;
             eprintln!(
                 "stream stats: {:.1} fps, {:.0} ms encode avg, {:.0} kbps (last {} frames)",
                 fps_actual,
@@ -721,12 +804,24 @@ async fn stream_loop(
                 kbps,
                 stats_frames
             );
+            if let Some(fb) = &recv_fb {
+                eprintln!(
+                    "qos: recv feedback loss={:.1}% lag={:.0}ms jitter={:.0}ms drops={}",
+                    fb.fraction_lost * 100.0,
+                    fb.decode_lag_ms,
+                    fb.jitter_ms,
+                    fb.dropped_frames
+                );
+            }
             if let Some(controller) = qos_controller.as_mut() {
                 let sample = StreamMetricsSample {
                     actual_fps: fps_actual,
                     target_fps: fps as f64,
                     avg_encode_ms: avg_encode,
                     kbps,
+                    fraction_lost: recv_fb.as_ref().map(|f| f.fraction_lost),
+                    recv_decode_lag_ms: recv_fb.as_ref().map(|f| f.decode_lag_ms),
+                    recv_jitter_ms: recv_fb.as_ref().map(|f| f.jitter_ms),
                 };
                 let action = controller.observe_window(sample);
                 match action {

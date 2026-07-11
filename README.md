@@ -106,6 +106,7 @@ Docs for agents and maintainers
 - Copilot contributor guidance: [.github/copilot-instructions.md](.github/copilot-instructions.md)
 - Recommended dependency snippets: [DEPS.md](DEPS.md)
 - ARM QEMU embedded recv lab: [docs/QEMU-ARM-RECV.md](docs/QEMU-ARM-RECV.md)
+- Raspberry Pi Zero W recv: [docs/PI-ZERO-W.md](docs/PI-ZERO-W.md)
 
 Roadmap (short)
 
@@ -115,7 +116,7 @@ Roadmap (short)
 4. **Phase 1c** — discover negotiation ✅ — [docs/PHASE-1C.md](docs/PHASE-1C.md)
 5. **Phase QoS v1 foundation** — metrics hints, `class=embedded` (closed loop not done) — [docs/PHASE-QOS.md](docs/PHASE-QOS.md)
 6. **Phase Audio v0–v1.2** — Opus RTP, native codec, RTCP A/V sync ✅ — [docs/PHASE-AUDIO.md](docs/PHASE-AUDIO.md), [protocol v1.1](docs/spec/std/zerocast-protocol-v1.md)
-7. **Phase QoS closed loop** — hot reconfigure, RTCP/recv lag — [docs/PHASE-QOS.md](docs/PHASE-QOS.md)
+7. **Phase QoS closed loop** — RTCP recv feedback, hot reconfigure ✅ — [docs/PHASE-QOS.md](docs/PHASE-QOS.md)
 8. Android receiver, then sender
 9. iOS support (ReplayKit + VideoToolbox)
 10. **Embedded recv** — Linux ARM (Pi Zero W, Wi‑Fi) — [docs/PHASE-QOS.md](docs/PHASE-QOS.md#embedded-receivers-linux-arm--wifi)
