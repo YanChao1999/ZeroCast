@@ -1,4 +1,4 @@
-//! Minimal RTCP Sender Report (PT=200) helpers (RFC 3550).
+//! Minimal RTCP helpers (RFC 3550): Sender Report + ZeroCast recv feedback APP.
 
 /// Seconds between NTP epoch (1900-01-01) and Unix epoch (1970-01-01).
 const NTP_UNIX_OFFSET: u64 = 2_208_988_800;
@@ -85,6 +85,74 @@ pub fn wall_to_ntp(now_ns: u128) -> (u32, u32) {
     (ntp_secs, ntp_frac)
 }
 
+/// Packet type for Application-Defined RTCP.
+const RTCP_PT_APP: u8 = 204;
+
+/// ZeroCast APP name (4 ASCII bytes).
+pub const ZC_APP_NAME: [u8; 4] = *b"ZCst";
+
+/// Recv → sender QoS feedback (RTCP APP).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct RecvFeedback {
+    /// Fraction lost over the reporting window (0.0–1.0).
+    pub fraction_lost: f64,
+    /// Inter-arrival jitter estimate in milliseconds.
+    pub jitter_ms: f64,
+    /// Decode queue lag (queued frames × frame period + recent decode time).
+    pub decode_lag_ms: f64,
+    /// Frames dropped because decode or display fell behind.
+    pub dropped_frames: u16,
+}
+
+/// Build a ZeroCast RTCP APP feedback packet (24 bytes).
+pub fn build_recv_feedback(ssrc: u32, fb: RecvFeedback) -> [u8; 24] {
+    const BODY_LEN: usize = 9;
+    let words = (4 + BODY_LEN).div_ceil(4); // SSRC + name + body → 6 words
+    let length_words = (words as u16).saturating_sub(1);
+    let mut pkt = [0u8; 24];
+    pkt[0] = RTCP_HDR_V2_RC0;
+    pkt[1] = RTCP_PT_APP;
+    pkt[2] = ((length_words >> 8) & 0xFF) as u8;
+    pkt[3] = (length_words & 0xFF) as u8;
+    pkt[4..8].copy_from_slice(&ssrc.to_be_bytes());
+    pkt[8..12].copy_from_slice(&ZC_APP_NAME);
+    pkt[12] = 1; // feedback version
+    let frac = (fb.fraction_lost.clamp(0.0, 1.0) * 255.0).round() as u8;
+    pkt[13] = frac;
+    let lag = fb.decode_lag_ms.clamp(0.0, 65_535.0).round() as u16;
+    let jitter = fb.jitter_ms.clamp(0.0, 65_535.0).round() as u16;
+    pkt[14..16].copy_from_slice(&lag.to_be_bytes());
+    pkt[16..18].copy_from_slice(&jitter.to_be_bytes());
+    pkt[18..20].copy_from_slice(&fb.dropped_frames.to_be_bytes());
+    pkt
+}
+
+/// Parse a ZeroCast RTCP APP feedback packet.
+pub fn parse_recv_feedback(buf: &[u8]) -> Option<RecvFeedback> {
+    if buf.len() < 20 {
+        return None;
+    }
+    if buf[0] >> RTCP_VERSION_SHIFT != RTCP_VERSION || buf[1] != RTCP_PT_APP {
+        return None;
+    }
+    if buf[8..12] != ZC_APP_NAME {
+        return None;
+    }
+    if buf[12] != 1 {
+        return None;
+    }
+    let frac = buf[13] as f64 / 255.0;
+    let decode_lag_ms = u16::from_be_bytes([buf[14], buf[15]]) as f64;
+    let jitter_ms = u16::from_be_bytes([buf[16], buf[17]]) as f64;
+    let dropped_frames = u16::from_be_bytes([buf[18], buf[19]]);
+    Some(RecvFeedback {
+        fraction_lost: frac,
+        jitter_ms,
+        decode_lag_ms,
+        dropped_frames,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -117,5 +185,21 @@ mod tests {
     fn parse_rtcp_sr_rejects_truncated_buffer() {
         let sr = build_rtcp_sr(1, 0, 0, 0);
         assert!(parse_rtcp_sr(&sr[..20]).is_none());
+    }
+
+    #[test]
+    fn recv_feedback_roundtrip() {
+        let fb = RecvFeedback {
+            fraction_lost: 0.12,
+            jitter_ms: 8.0,
+            decode_lag_ms: 120.0,
+            dropped_frames: 3,
+        };
+        let pkt = build_recv_feedback(0xB000_0001, fb);
+        let parsed = parse_recv_feedback(&pkt).expect("parse feedback");
+        assert!((parsed.fraction_lost - fb.fraction_lost).abs() < 0.02);
+        assert_eq!(parsed.jitter_ms, fb.jitter_ms);
+        assert_eq!(parsed.decode_lag_ms, fb.decode_lag_ms);
+        assert_eq!(parsed.dropped_frames, fb.dropped_frames);
     }
 }

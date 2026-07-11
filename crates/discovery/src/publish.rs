@@ -36,7 +36,10 @@ fn local_hostname() -> String {
 pub struct StreamPublisher {
     _daemon: ServiceDaemon,
     fullname: String,
-    _instance_name: String,
+    instance_name: String,
+    port: u16,
+    device_class: Option<String>,
+    with_audio: bool,
     stop_heartbeat: Arc<AtomicBool>,
     heartbeat: Option<JoinHandle<()>>,
 }
@@ -168,10 +171,84 @@ impl StreamPublisher {
         Ok(Self {
             _daemon: daemon,
             fullname,
-            _instance_name: instance_name.to_string(),
+            instance_name: instance_name.to_string(),
+            port,
+            device_class: device_class.map(str::to_string),
+            with_audio,
             stop_heartbeat,
             heartbeat: Some(heartbeat),
         })
+    }
+
+    /// Re-register mDNS with new session dimensions (QoS profile change on recv).
+    pub fn readvertise(&mut self, width: u32, height: u32, fps: u32) -> Result<()> {
+        let _ = self._daemon.unregister(&self.fullname);
+        let daemon = create_daemon()?;
+        let host = format!("{}.local.", local_hostname());
+        let audio_port = zerocast_protocol::audio_port_from_video(self.port)
+            .unwrap_or(zerocast_protocol::ports::AUDIO_RTP_DEFAULT);
+        let mut properties = vec![
+            (zerocast_protocol::mdns::TXT_V.to_string(), zerocast_protocol::PROTOCOL_VERSION.to_string()),
+            (zerocast_protocol::mdns::TXT_W.to_string(), width.to_string()),
+            (zerocast_protocol::mdns::TXT_H.to_string(), height.to_string()),
+            (zerocast_protocol::mdns::TXT_FPS.to_string(), fps.to_string()),
+            (zerocast_protocol::mdns::TXT_MAX_W.to_string(), width.to_string()),
+            (zerocast_protocol::mdns::TXT_MAX_H.to_string(), height.to_string()),
+            (zerocast_protocol::mdns::TXT_MAX_FPS.to_string(), fps.to_string()),
+        ];
+        if let Some(ref class) = self.device_class {
+            properties.push((zerocast_protocol::mdns::TXT_CLASS.to_string(), class.clone()));
+        }
+        if self.with_audio {
+            properties.push((zerocast_protocol::mdns::TXT_AUDIO.to_string(), "1".to_string()));
+            properties.push((zerocast_protocol::mdns::TXT_AUDIO_PORT.to_string(), audio_port.to_string()));
+            properties.push((
+                zerocast_protocol::mdns::TXT_AUDIO_SR.to_string(),
+                zerocast_protocol::audio::SAMPLE_RATE.to_string(),
+            ));
+            properties.push((
+                zerocast_protocol::mdns::TXT_AUDIO_CH.to_string(),
+                zerocast_protocol::audio::CHANNELS.to_string(),
+            ));
+        }
+        let addrs = local_ip_addrs();
+        let info = ServiceInfo::new(
+            SERVICE_TYPE,
+            &self.instance_name,
+            &host,
+            &addrs[..],
+            self.port,
+            &properties[..],
+        )
+        .context("invalid mDNS service info")?
+        .enable_addr_auto();
+        self.fullname = info.get_fullname().to_string();
+        daemon
+            .register(info)
+            .context("failed to re-register mDNS service")?;
+        self._daemon = daemon;
+        eprintln!(
+            "mdns: re-advertised {} on port {} ({}x{} @ {} fps)",
+            self.instance_name, self.port, width, height, fps
+        );
+        let local_ad = StreamAdvertisement {
+            instance_name: self.instance_name.clone(),
+            host: primary_ipv4().to_string(),
+            port: self.port,
+            width,
+            height,
+            fps,
+            max_width: width,
+            max_height: height,
+            max_fps: fps,
+            device_class: self.device_class.clone(),
+            audio: self.with_audio,
+            audio_port: if self.with_audio { audio_port } else { 0 },
+            audio_sample_rate: zerocast_protocol::audio::SAMPLE_RATE,
+            audio_channels: zerocast_protocol::audio::CHANNELS,
+        };
+        local_registry::write_receiver(&local_ad)?;
+        Ok(())
     }
 
     pub fn fullname(&self) -> &str {

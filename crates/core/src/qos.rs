@@ -30,6 +30,12 @@ pub struct StreamMetricsSample {
     pub target_fps: f64,
     pub avg_encode_ms: f64,
     pub kbps: f64,
+    /// Recv-reported RTP loss fraction (0.0–1.0), if available.
+    pub fraction_lost: Option<f64>,
+    /// Recv-reported decode/display lag in ms, if available.
+    pub recv_decode_lag_ms: Option<f64>,
+    /// Recv-reported inter-arrival jitter in ms, if available.
+    pub recv_jitter_ms: Option<f64>,
 }
 
 /// What the controller suggests after `observe_window`.
@@ -50,6 +56,10 @@ pub struct QosConfig {
     pub good_windows_for_upgrade: u32,
     /// Ignore metrics for this many windows after stream start (warmup).
     pub warmup_windows: u32,
+    /// Max fraction lost (recv RTCP) before counting a bad window.
+    pub max_fraction_lost: f64,
+    /// Max recv decode lag (ms) before counting a bad window.
+    pub max_decode_lag_ms: f64,
 }
 
 impl QosConfig {
@@ -61,6 +71,8 @@ impl QosConfig {
             bad_windows_for_downgrade: if embedded { 1 } else { 2 },
             good_windows_for_upgrade: if embedded { 6 } else { 5 },
             warmup_windows: 3,
+            max_fraction_lost: if embedded { 0.04 } else { 0.08 },
+            max_decode_lag_ms: frame_ms * if embedded { 2.5 } else { 3.0 },
         }
     }
 }
@@ -161,7 +173,15 @@ impl QosController {
         } else {
             sample.actual_fps / sample.target_fps >= self.config.min_fps_ratio
         };
-        !fps_ok || !encode_ok
+        let loss_ok = sample
+            .fraction_lost
+            .map(|f| f <= self.config.max_fraction_lost)
+            .unwrap_or(true);
+        let lag_ok = sample
+            .recv_decode_lag_ms
+            .map(|l| l <= self.config.max_decode_lag_ms)
+            .unwrap_or(true);
+        !fps_ok || !encode_ok || !loss_ok || !lag_ok
     }
 
     /// Feed one stats window; returns an action when hysteresis triggers.
@@ -224,6 +244,9 @@ mod tests {
             target_fps: 60.0,
             avg_encode_ms: 5.0,
             kbps: 2000.0,
+            fraction_lost: None,
+            recv_decode_lag_ms: None,
+            recv_jitter_ms: None,
         };
         for _ in 0..3 {
             let _ = qos.observe_window(bad);
@@ -256,6 +279,9 @@ mod tests {
             target_fps: 30.0,
             avg_encode_ms: 8.0,
             kbps: 5000.0,
+            fraction_lost: None,
+            recv_decode_lag_ms: None,
+            recv_jitter_ms: None,
         };
         for _ in 0..10 {
             assert_eq!(qos.observe_window(bad), QosAction::Hold);
@@ -277,6 +303,9 @@ mod tests {
             target_fps: 60.0,
             avg_encode_ms: 5.0,
             kbps: 1500.0,
+            fraction_lost: None,
+            recv_decode_lag_ms: None,
+            recv_jitter_ms: None,
         };
         for _ in 0..3 {
             let _ = qos.observe_window(bad);
@@ -285,5 +314,37 @@ mod tests {
             qos.observe_window(bad),
             QosAction::RecommendDowngrade(_)
         ));
+    }
+
+    #[test]
+    fn downgrade_on_recv_decode_lag() {
+        let mut qos = QosController::new(
+            StreamProfile::high_for_display(1920, 1080, 60),
+            1920,
+            1080,
+            60,
+            None,
+            DeviceClass::Desktop,
+        );
+        let bad = StreamMetricsSample {
+            actual_fps: 58.0,
+            target_fps: 60.0,
+            avg_encode_ms: 5.0,
+            kbps: 8000.0,
+            fraction_lost: Some(0.0),
+            recv_decode_lag_ms: Some(500.0),
+            recv_jitter_ms: Some(2.0),
+        };
+        let mut downgraded = false;
+        for _ in 0..8 {
+            if matches!(
+                qos.observe_window(bad),
+                QosAction::RecommendDowngrade(_)
+            ) {
+                downgraded = true;
+                break;
+            }
+        }
+        assert!(downgraded, "expected downgrade on recv decode lag");
     }
 }

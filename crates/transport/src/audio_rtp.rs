@@ -363,7 +363,10 @@ impl RecvAvOpts {
 /// Run video recv-log and optional audio recv (log or playback).
 pub async fn recv_log_av(video_local: &str, opts: RecvAvOpts) -> anyhow::Result<()> {
     if !opts.with_audio {
-        return Receiver::bind(video_local).await?.run().await;
+        return Receiver::bind_with_fps(video_local, opts.video_fps)
+            .await?
+            .run()
+            .await;
     }
     let audio_local = zerocast_protocol::audio_bind_from_video(video_local, None)?;
     eprintln!(
@@ -371,7 +374,7 @@ pub async fn recv_log_av(video_local: &str, opts: RecvAvOpts) -> anyhow::Result<
         if opts.playback { " (playback)" } else { "" }
     );
     let sync = Arc::new(AvSyncState::new(opts.video_fps));
-    let video = Receiver::bind(video_local).await?;
+    let video = Receiver::bind_with_fps(video_local, opts.video_fps).await?;
     let audio = AudioReceiver::bind(&audio_local).await?;
     let sync_video = sync.clone();
     let sync_v = sync.clone();
