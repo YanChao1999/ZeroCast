@@ -97,7 +97,8 @@ Project layout
 - `crates/discovery` — mDNS-SD publish/browse (Phase 2a)
 
 Docs for agents and maintainers
-- **Protocol spec:** [docs/spec/std/zerocast-protocol-v1.md](docs/spec/std/zerocast-protocol-v1.md)
+- **Protocol spec:** [docs/spec/std/zerocast-protocol-v1.md](docs/spec/std/zerocast-protocol-v1.md) · [v2 security draft](docs/spec/std/zerocast-protocol-v2.md)
+- **Phase Security:** [docs/PHASE-SECURITY.md](docs/PHASE-SECURITY.md) — OOB pairing, QUIC control, SRTP
 - AI agent baseline: [AGENTS.md](AGENTS.md)
 - Agent skill and instructions: [SKILL.md](SKILL.md)
 - Copilot contributor guidance: [.github/copilot-instructions.md](.github/copilot-instructions.md)
@@ -113,6 +114,7 @@ Roadmap (short)
 5. **Phase QoS v1 foundation** — metrics hints, `class=embedded` (closed loop not done) — [docs/PHASE-QOS.md](docs/PHASE-QOS.md)
 6. **Phase Audio v0** — Opus RTP + spec ([docs/PHASE-AUDIO.md](docs/PHASE-AUDIO.md), [protocol v1.1](docs/spec/std/zerocast-protocol-v1.md))
 7. **Phase QoS closed loop** — hot reconfigure, RTCP/recv lag — [docs/PHASE-QOS.md](docs/PHASE-QOS.md)
-8. Android receiver, then sender
-9. iOS support (ReplayKit + VideoToolbox)
-10. **Embedded recv** — Linux ARM (Pi Zero W, Wi‑Fi) — [docs/PHASE-QOS.md](docs/PHASE-QOS.md#embedded-receivers-linux-arm--wifi)
+8. **Phase Security v0** — OOB PIN pairing, QUIC control, SRTP — [docs/PHASE-SECURITY.md](docs/PHASE-SECURITY.md), [protocol v2 draft](docs/spec/std/zerocast-protocol-v2.md)
+9. Android receiver, then sender
+10. iOS support (ReplayKit + VideoToolbox)
+11. **Embedded recv** — Linux ARM (Pi Zero W, Wi‑Fi) — [docs/PHASE-QOS.md](docs/PHASE-QOS.md#embedded-receivers-linux-arm--wifi)
