@@ -2,6 +2,8 @@
 
 Static landing page for [ZeroCast](https://github.com/YanChao1999/ZeroCast), served from this `docs/` folder.
 
+**Live site:** https://yanchao1999.github.io/ZeroCast/
+
 ## Local preview
 
 ```bash
@@ -14,12 +16,10 @@ Open http://localhost:8080
 
 Deploys automatically via GitHub Actions when changes under `docs/` are pushed to `main` (`.github/workflows/pages.yml`).
 
-**One-time setup:**
+Repo setup (done):
 
-1. **Settings → Pages → Build and deployment → Source → GitHub Actions**
-2. Merge into `main` — the workflow publishes the `docs/` folder
-
-Site URL: **https://yanchao1999.github.io/ZeroCast/**
+- **Settings → Pages → Source → GitHub Actions**
+- Workflow publishes the `docs/` folder on each qualifying push to `main`
 
 ## Site files
 
@@ -31,4 +31,10 @@ docs/
 └── PAGES.md        # This file
 ```
 
-Phase and protocol docs in this folder are also published alongside the landing page.
+Phase and protocol markdown in this folder is also published alongside the landing page.
+
+## Editing the site
+
+1. Change files under `docs/` (`index.html`, `css/`, `js/`)
+2. Push to `main`
+3. Check the **Deploy GitHub Pages** workflow in Actions

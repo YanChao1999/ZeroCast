@@ -3,6 +3,7 @@
 Purpose: give AI coding agents a concise, actionable baseline for working in this repository.
 
 Key links
+- Project site: https://yanchao1999.github.io/ZeroCast/
 - Repo README: [README.md](README.md)
 - Workspace manifest: [Cargo.toml](Cargo.toml)
 - Core crate: [crates/core/src/lib.rs](crates/core/src/lib.rs)

@@ -2,6 +2,8 @@
 
 **Version 0.2.0** (workspace; see root `Cargo.toml` `[workspace.package]`)
 
+**Website:** [yanchao1999.github.io/ZeroCast](https://yanchao1999.github.io/ZeroCast/)
+
 Lightweight, zero-configuration LAN screen casting built around a shared Rust core and thin platform adapters.
 
 Goals
@@ -97,6 +99,7 @@ Project layout
 - `crates/discovery` — mDNS-SD publish/browse (Phase 2a)
 
 Docs for agents and maintainers
+- **Project site:** [yanchao1999.github.io/ZeroCast](https://yanchao1999.github.io/ZeroCast/) (source: `docs/index.html`)
 - **Protocol spec:** [docs/spec/std/zerocast-protocol-v1.md](docs/spec/std/zerocast-protocol-v1.md)
 - AI agent baseline: [AGENTS.md](AGENTS.md)
 - Agent skill and instructions: [SKILL.md](SKILL.md)
@@ -111,7 +114,7 @@ Roadmap (short)
 3. **Phase 1b** — encoder pipe + sender stats ✅ — [docs/PHASE-1B.md](docs/PHASE-1B.md)
 4. **Phase 1c** — discover negotiation ✅ — [docs/PHASE-1C.md](docs/PHASE-1C.md)
 5. **Phase QoS v1 foundation** — metrics hints, `class=embedded` (closed loop not done) — [docs/PHASE-QOS.md](docs/PHASE-QOS.md)
-6. **Phase Audio v0** — Opus RTP + spec ([docs/PHASE-AUDIO.md](docs/PHASE-AUDIO.md), [protocol v1.1](docs/spec/std/zerocast-protocol-v1.md))
+6. **Phase Audio v0–v1.2** — Opus RTP, native codec, RTCP A/V sync ✅ — [docs/PHASE-AUDIO.md](docs/PHASE-AUDIO.md), [protocol v1.1](docs/spec/std/zerocast-protocol-v1.md)
 7. **Phase QoS closed loop** — hot reconfigure, RTCP/recv lag — [docs/PHASE-QOS.md](docs/PHASE-QOS.md)
 8. Android receiver, then sender
 9. iOS support (ReplayKit + VideoToolbox)
